@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-import re
 import tempfile
 import threading
 from collections import deque
@@ -17,6 +16,7 @@ import yt_dlp
 
 from .audio_mix import FRAME_BYTES, SILENCE, mix_pcm, normalize
 from .music_queue import MusicQueue
+from .tts_text import speech_text
 
 log = logging.getLogger(__name__)
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
@@ -35,7 +35,7 @@ def valid_query(query: str) -> bool:
 def discover_tracks(query: str) -> list[dict]:
     """Resolve keywords, individual YouTube links, or a YouTube playlist (30 max)."""
     if not valid_query(query):
-        raise ValueError("YouTube URL（https）または曲名を入力してください。")
+        raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
     settings = {
         "quiet": True,
         "no_warnings": True,
@@ -262,12 +262,3 @@ class GuildPlayer:
         self.mixer.cleanup()
         if self.vc.is_connected():
             await self.vc.disconnect(force=True)
-
-
-def speech_text(author: str, content: str) -> str:
-    """Avoid reading URL noise, mentions, markdown, and very long messages."""
-    content = re.sub(r"https?://\S+", "リンク", content)
-    content = re.sub(r"<[@#][!&]?\d+>", "", content)
-    content = re.sub(r"[`*_~|]", "", content)
-    content = " ".join(content.split())[:180]
-    return f"{author}さん、{content}" if content else ""

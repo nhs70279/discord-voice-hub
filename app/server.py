@@ -16,6 +16,7 @@ import discord
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import db
@@ -31,7 +32,8 @@ CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback")
 SECURE_COOKIES = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 ALLOWED_ORIGIN = f"{urlsplit(REDIRECT_URI).scheme}://{urlsplit(REDIRECT_URI).netloc}"
-INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+INDEX = STATIC_DIR / "index.html"
 
 
 @asynccontextmanager
@@ -52,7 +54,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(task, return_exceptions=True)
 
 
-app = FastAPI(title="Voice Hub", lifespan=lifespan)
+app = FastAPI(title="ลิลิน — ผู้ช่วยเสียงภาษาไทย", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/healthz", include_in_schema=False)
@@ -66,7 +69,7 @@ async def healthz(request: Request):
 async def same_origin_writes(request: Request, call_next):
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith(("/api/", "/auth/logout")):
         if request.headers.get("origin") != ALLOWED_ORIGIN:
-            return JSONResponse({"detail": "Origin verification failed"}, status_code=403)
+            return JSONResponse({"detail": "ไม่สามารถตรวจสอบต้นทางของคำขอได้"}, status_code=403)
     return await call_next(request)
 
 
@@ -78,7 +81,7 @@ async def home():
 @app.get("/auth/login")
 async def login():
     if not CLIENT_ID or not CLIENT_SECRET:
-        raise HTTPException(503, "Discord OAuth settings are not configured")
+        raise HTTPException(503, "ยังไม่ได้ตั้งค่าการเข้าสู่ระบบด้วย Discord")
     state = secrets.token_urlsafe(30)
     url = "https://discord.com/oauth2/authorize?" + urlencode({
         "client_id": CLIENT_ID,
@@ -100,7 +103,7 @@ async def exchange_token(data: dict) -> dict:
         )
         if response.status_code >= 400:
             log.warning("Discord OAuth error %s", response.status_code)
-            raise HTTPException(401, "Discord authentication failed")
+            raise HTTPException(401, "ยืนยันตัวตนกับ Discord ไม่สำเร็จ")
         return response.json()
 
 
@@ -108,7 +111,7 @@ async def discord_api(path: str, access_token: str):
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.get(f"{OAUTH_API}{path}", headers={"Authorization": f"Bearer {access_token}"})
         if response.status_code >= 400:
-            raise HTTPException(401, "Discord session expired. Please log in again")
+            raise HTTPException(401, "เซสชัน Discord หมดอายุ กรุณาเข้าสู่ระบบใหม่")
         return response.json()
 
 
@@ -116,7 +119,7 @@ async def discord_api(path: str, access_token: str):
 async def callback(request: Request, code: str = "", state: str = ""):
     expected = request.cookies.get("vh_oauth_state", "")
     if not code or not state or not secrets.compare_digest(state, expected):
-        raise HTTPException(400, "Invalid OAuth state")
+        raise HTTPException(400, "ข้อมูลการเข้าสู่ระบบไม่ถูกต้อง")
     token = await exchange_token({"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT_URI})
     person = await discord_api("/users/@me", token["access_token"])
     session_id = secrets.token_urlsafe(40)
@@ -138,12 +141,12 @@ async def callback(request: Request, code: str = "", state: str = ""):
 async def require_session(request: Request):
     raw = request.cookies.get("vh_session", "")
     if not raw:
-        raise HTTPException(401, "Please log in")
+        raise HTTPException(401, "กรุณาเข้าสู่ระบบก่อนค่ะ")
     session_hash = hashlib.sha256(raw.encode()).hexdigest()
     with db.connect() as conn:
         item = conn.execute("SELECT * FROM sessions WHERE session_hash=?", (session_hash,)).fetchone()
     if item is None or int(item["created_at"]) < int(time.time()) - 30 * 86400:
-        raise HTTPException(401, "Please log in")
+        raise HTTPException(401, "กรุณาเข้าสู่ระบบก่อนค่ะ")
     session = dict(item)
     if session["expires_at"] <= int(time.time()) + 90:
         token = await exchange_token({"grant_type": "refresh_token", "refresh_token": session["refresh_token"]})
@@ -172,10 +175,10 @@ async def user_guilds(request: Request, session=Depends(require_session)):
 
 async def require_guild(guild_id: str, guilds=Depends(user_guilds)):
     if not guild_id.isdigit():
-        raise HTTPException(400, "Invalid guild ID")
+        raise HTTPException(400, "รหัสเซิร์ฟเวอร์ไม่ถูกต้อง")
     found = next((g for g in guilds if g["id"] == guild_id), None)
     if not found:
-        raise HTTPException(403, "Not a member of this Bot's server")
+        raise HTTPException(403, "คุณไม่ได้เป็นสมาชิกของเซิร์ฟเวอร์ที่มีลิลิน")
     return found
 
 
@@ -223,7 +226,7 @@ async def add_playlist(guild_id: str, data: PlaylistName, session=Depends(requir
 async def playlist_detail(guild_id: str, playlist_id: int, session=Depends(require_session), guild=Depends(require_guild)):
     result = db.get_playlist(session["user_id"], guild_id, playlist_id)
     if result is None:
-        raise HTTPException(404, "Playlist not found")
+        raise HTTPException(404, "ไม่พบเพลย์ลิสต์")
     return result
 
 
@@ -243,9 +246,9 @@ class QueueMoveRequest(BaseModel):
 def web_voice_player(request: Request, guild_id: str, user_id: str):
     player = request.app.state.bot.guild_players.get(int(guild_id))
     if not player or not player.vc.is_connected():
-        raise HTTPException(409, "先にDiscordで /join を実行してください。")
+        raise HTTPException(409, "กรุณาพิมพ์ /join ใน Discord ก่อนค่ะ")
     if not any(str(member.id) == user_id for member in player.vc.channel.members):
-        raise HTTPException(403, "Botと同じVCに参加してください。")
+        raise HTTPException(403, "กรุณาเข้าห้องเสียงเดียวกับลิลินค่ะ")
     return player
 
 
@@ -311,7 +314,7 @@ async def queue_command(request: Request, guild_id: str, command: str, session=D
     elif command in {"repeat_off", "repeat_one", "repeat_all"}:
         player.repeat_mode = command.removeprefix("repeat_")
     else:
-        raise HTTPException(400, "未対応の操作です。")
+        raise HTTPException(400, "ไม่รองรับคำสั่งนี้")
     return {"ok": True}
 
 
@@ -319,27 +322,27 @@ async def queue_command(request: Request, guild_id: str, command: str, session=D
 async def add_item(guild_id: str, playlist_id: int, data: TrackRequest, session=Depends(require_session), guild=Depends(require_guild)):
     from .player import valid_query
     if not valid_query(data.query):
-        raise HTTPException(400, "Enter a track name or YouTube HTTPS URL")
+        raise HTTPException(400, "กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
     try:
         success = db.add_playlist_item(session["user_id"], guild_id, playlist_id, data.query.strip())
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     if not success:
-        raise HTTPException(404, "Playlist not found")
+        raise HTTPException(404, "ไม่พบเพลย์ลิสต์")
     return {"ok": True}
 
 
 @app.delete("/api/guilds/{guild_id}/playlists/{playlist_id}/items/{item_id}")
 async def remove_item(guild_id: str, playlist_id: int, item_id: int, session=Depends(require_session), guild=Depends(require_guild)):
     if not db.delete_playlist_item(session["user_id"], guild_id, playlist_id, item_id):
-        raise HTTPException(404, "Track not found")
+        raise HTTPException(404, "ไม่พบเพลง")
     return {"ok": True}
 
 
 @app.delete("/api/guilds/{guild_id}/playlists/{playlist_id}")
 async def remove_playlist(guild_id: str, playlist_id: int, session=Depends(require_session), guild=Depends(require_guild)):
     if not db.delete_playlist(session["user_id"], guild_id, playlist_id):
-        raise HTTPException(404, "Playlist not found")
+        raise HTTPException(404, "ไม่พบเพลย์ลิสต์")
     return {"ok": True}
 
 
@@ -347,7 +350,7 @@ async def remove_playlist(guild_id: str, playlist_id: int, session=Depends(requi
 async def play_playlist(request: Request, guild_id: str, playlist_id: int, session=Depends(require_session), guild=Depends(require_guild)):
     record = db.get_playlist(session["user_id"], guild_id, playlist_id)
     if not record:
-        raise HTTPException(404, "Playlist not found")
+        raise HTTPException(404, "ไม่พบเพลย์ลิสต์")
     bot = request.app.state.bot
     web_voice_player(request, guild_id, session["user_id"])
     count = 0
@@ -379,11 +382,11 @@ class ChannelSetting(BaseModel):
 @app.put("/api/guilds/{guild_id}/settings")
 async def update_guild_settings(request: Request, guild_id: str, data: ChannelSetting, guild=Depends(require_guild)):
     if not (int(guild["permissions"]) & 0x28):
-        raise HTTPException(403, "Server management permission required")
+        raise HTTPException(403, "ต้องมีสิทธิ์จัดการเซิร์ฟเวอร์ค่ะ")
     bot_guild = request.app.state.bot.get_guild(int(guild_id))
     channel = bot_guild.get_channel(int(data.channel_id)) if bot_guild and data.channel_id.isdigit() else None
     if not isinstance(channel, discord.TextChannel):
-        raise HTTPException(400, "Choose a valid text channel")
+        raise HTTPException(400, "กรุณาเลือกช่องข้อความที่ถูกต้อง")
     db.set_read_channel(guild_id, channel.id)
     return {"ok": True}
 

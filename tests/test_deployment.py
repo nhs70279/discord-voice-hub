@@ -27,8 +27,12 @@ class FlyConfigurationTests(unittest.TestCase):
         self.assertNotIn("processes", self.config)
 
     def test_persistent_database_and_https(self):
-        self.assertEqual(self.config["mounts"]["source"], "voicehub_data")
-        self.assertEqual(self.config["mounts"]["destination"], "/data")
+        # Fly Launch generates [[mounts]], while the starter used [mounts].
+        mounts = self.config["mounts"]
+        if isinstance(mounts, list):
+            mounts = mounts[0]
+        self.assertEqual(mounts["source"], "voicehub_data")
+        self.assertEqual(mounts["destination"], "/data")
         self.assertEqual(self.config["env"]["DATABASE_PATH"], "/data/voice_hub.sqlite3")
         self.assertEqual(self.config["env"]["COOKIE_SECURE"], "true")
         self.assertTrue(self.config["http_service"]["force_https"])
@@ -48,12 +52,12 @@ class BackupTests(unittest.TestCase):
             os.environ["DATABASE_PATH"] = str(Path(temp) / "voice.sqlite3")
             try:
                 db.initialize()
-                db.set_voice("user", "th-TH-NiwatNeural")
+                db.set_voice("user", db.DEFAULT_VOICE)
                 destination = Path(temp) / "backups" / "copy.sqlite3"
                 self.assertEqual(create_backup(destination), destination)
                 with sqlite3.connect(destination) as connection:
                     voice = connection.execute("SELECT voice FROM preferences WHERE user_id='user'").fetchone()
-                self.assertEqual(voice[0], "th-TH-NiwatNeural")
+                self.assertEqual(voice[0], db.DEFAULT_VOICE)
                 with self.assertRaises(FileExistsError):
                     create_backup(destination)
                 with self.assertRaises(ValueError):

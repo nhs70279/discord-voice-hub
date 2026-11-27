@@ -49,16 +49,16 @@ class VoiceHubBot(commands.Bot):
 
     async def ensure_player(self, interaction: discord.Interaction) -> GuildPlayer:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            raise ValueError("サーバー内で使用してください。")
+            raise ValueError("ใช้คำสั่งนี้ในเซิร์ฟเวอร์ Discord นะคะ")
         user_voice = interaction.user.voice
         if not user_voice or not user_voice.channel:
-            raise ValueError("先にボイスチャンネルへ参加してください。")
+            raise ValueError("กรุณาเข้าห้องเสียงก่อนค่ะ")
         guild_id = interaction.guild.id
         existing = self.guild_players.get(guild_id)
         if existing:
             if existing.vc.channel != user_voice.channel:
                 if any(not member.bot for member in existing.vc.channel.members):
-                    raise ValueError("Botは別のVCで使用中です。現在のVCに参加するか、Botを退出させてください。")
+                    raise ValueError("ลิลินกำลังใช้งานในห้องเสียงอื่นอยู่ค่ะ กรุณาเข้าห้องนั้นก่อนนะคะ")
                 await existing.vc.move_to(user_voice.channel)
             return existing
         vc = interaction.guild.voice_client
@@ -90,12 +90,12 @@ class VoiceHubBot(commands.Bot):
     async def enqueue_query(self, guild_id: int, query: str, requester: str, *, front: bool = False, now: bool = False) -> int:
         player = self.guild_players.get(guild_id)
         if not player:
-            raise ValueError("先に /join でBotをVCに参加させてください。")
+            raise ValueError("พิมพ์ /join เพื่อให้ลิลินเข้าห้องเสียงก่อนค่ะ")
         if not valid_query(query):
-            raise ValueError("曲名またはYouTubeのHTTPS URLを指定してください。")
+            raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
         tracks = await asyncio.to_thread(discover_tracks, query)
         if not tracks:
-            raise ValueError("曲が見つかりませんでした。")
+            raise ValueError("ลิลินหาเพลงนี้ไม่เจอค่ะ")
         items = [Track(track["title"], track["url"], requester) for track in tracks]
         player.add_tracks(items, front=front or now, now=now)
         return len(tracks)
@@ -103,9 +103,9 @@ class VoiceHubBot(commands.Bot):
     def player_for_command(self, interaction: discord.Interaction) -> GuildPlayer:
         player = self.guild_players.get(interaction.guild_id)
         if not player:
-            raise ValueError("BotはVCにいません。")
+            raise ValueError("ลิลินยังไม่ได้เข้าห้องเสียงค่ะ")
         if not isinstance(interaction.user, discord.Member) or not interaction.user.voice or interaction.user.voice.channel != player.vc.channel:
-            raise ValueError("Botと同じVCに参加してください。")
+            raise ValueError("กรุณาเข้าห้องเสียงเดียวกับลิลินค่ะ")
         return player
 
 
@@ -113,180 +113,180 @@ class VoiceCommands(commands.Cog):
     def __init__(self, bot: VoiceHubBot):
         self.bot = bot
 
-    @app_commands.command(name="join", description="VCに参加し、チャット読み上げを自動開始")
-    @app_commands.describe(channel="読み上げるテキストチャンネル（省略すると現在のチャンネル）")
+    @app_commands.command(name="join", description="ให้ลิลินเข้าห้องเสียงและเริ่มอ่านแชตภาษาไทย")
+    @app_commands.describe(channel="ช่องข้อความที่จะอ่าน (เว้นว่างเพื่อใช้ช่องปัจจุบัน)")
     async def join(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None):
         await interaction.response.defer(ephemeral=True)
         try:
             player = await self.bot.ensure_player(interaction)
             selected = channel or interaction.channel
             if not selected or not isinstance(selected, (discord.TextChannel, discord.Thread)):
-                raise ValueError("テキストチャンネルで /join を実行してください。")
+                raise ValueError("กรุณาใช้ /join ในช่องข้อความค่ะ")
             db.set_read_channel(interaction.guild_id, selected.id)
-            await interaction.followup.send(f"🔊 {player.vc.channel.mention} に参加！ {selected.mention} のチャットを自動で読み上げます。", ephemeral=True)
+            await interaction.followup.send(f"💜 ลิลินมาแล้วค่ะ! อยู่ที่ {player.vc.channel.mention} และจะอ่านแชตจาก {selected.mention} ให้อัตโนมัตินะคะ", ephemeral=True)
         except Exception as error:
             await interaction.followup.send(str(error), ephemeral=True)
 
-    @app_commands.command(name="play", description="曲名・YouTube URL・プレイリストURLで再生予約")
+    @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อหรือลิงก์ YouTube หรือเพลย์ลิสต์")
     async def play(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer(ephemeral=True)
         try:
             await self.bot.ensure_player(interaction)
             count = await self.bot.enqueue_query(interaction.guild_id, query, str(interaction.user.id))
-            await interaction.followup.send(f"🎵 {count}曲を再生キューに追加しました。", ephemeral=True)
+            await interaction.followup.send(f"🎵 ลิลินเพิ่มเพลงให้แล้ว {count} เพลงค่ะ", ephemeral=True)
         except Exception as error:
             log.warning("Play failed: %s", error)
-            await interaction.followup.send(f"再生できませんでした：{error}", ephemeral=True)
+            await interaction.followup.send(f"ขอโทษค่ะ เล่นเพลงไม่ได้: {error}", ephemeral=True)
 
-    @app_commands.command(name="next", description="現在の曲はそのまま、指定した曲を次に再生")
+    @app_commands.command(name="next", description="เพิ่มเพลงไว้เล่นถัดจากเพลงปัจจุบัน")
     async def play_next(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer(ephemeral=True)
         try:
             player = self.bot.player_for_command(interaction)
             count = await self.bot.enqueue_query(interaction.guild_id, query, str(interaction.user.id), front=True)
-            await interaction.followup.send(f"⏭️ {count}曲をキューの先頭に追加しました。現在の曲が終わると再生します。", ephemeral=True)
+            await interaction.followup.send(f"⏭️ ลิลินจัด {count} เพลงไว้เป็นเพลงถัดไปแล้วค่ะ", ephemeral=True)
         except Exception as error:
             await interaction.followup.send(str(error), ephemeral=True)
 
-    @app_commands.command(name="playnow", description="現在の曲を切り替え、指定した曲をすぐ再生")
+    @app_commands.command(name="playnow", description="ข้ามเพลงปัจจุบันแล้วเล่นเพลงใหม่ทันที")
     async def play_now(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer(ephemeral=True)
         try:
             self.bot.player_for_command(interaction)
             count = await self.bot.enqueue_query(interaction.guild_id, query, str(interaction.user.id), now=True)
-            await interaction.followup.send(f"▶️ {count}曲を最優先にしました。現在の曲をスキップして再生します。", ephemeral=True)
+            await interaction.followup.send(f"▶️ ลิลินจะข้ามเพลงเดิมแล้วเล่น {count} เพลงนี้ให้ทันทีค่ะ", ephemeral=True)
         except Exception as error:
             await interaction.followup.send(str(error), ephemeral=True)
 
-    @app_commands.command(name="skip", description="現在の曲をスキップ")
+    @app_commands.command(name="skip", description="ข้ามเพลงที่กำลังเล่น")
     async def skip(self, interaction: discord.Interaction):
         try:
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
         player.skip()
-        await interaction.response.send_message("⏭️ スキップしました。", ephemeral=True)
+        await interaction.response.send_message("⏭️ ข้ามเพลงแล้วค่ะ", ephemeral=True)
 
-    @app_commands.command(name="pause", description="音楽だけ一時停止（読み上げは継続）")
+    @app_commands.command(name="pause", description="พักเพลงชั่วคราว แต่ยังอ่านแชตต่อ")
     async def pause(self, interaction: discord.Interaction):
         try:
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
         player.mixer.paused = True
-        await interaction.response.send_message("⏸️ 音楽を一時停止しました。", ephemeral=True)
+        await interaction.response.send_message("⏸️ ลิลินพักเพลงไว้ก่อนนะคะ", ephemeral=True)
 
-    @app_commands.command(name="resume", description="音楽を再開")
+    @app_commands.command(name="resume", description="เล่นเพลงต่อ")
     async def resume(self, interaction: discord.Interaction):
         try:
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
         player.mixer.paused = False
-        await interaction.response.send_message("▶️ 音楽を再開しました。", ephemeral=True)
+        await interaction.response.send_message("▶️ เล่นเพลงต่อแล้วค่ะ", ephemeral=True)
 
-    @app_commands.command(name="queue", description="現在の曲と再生待ちを確認")
+    @app_commands.command(name="queue", description="ดูเพลงที่กำลังเล่นและคิวเพลงถัดไป")
     async def queue(self, interaction: discord.Interaction):
         player = self.bot.guild_players.get(interaction.guild_id)
         if not player:
-            return await interaction.response.send_message("BotはVCにいません。", ephemeral=True)
+            return await interaction.response.send_message("ลิลินยังไม่ได้เข้าห้องเสียงค่ะ", ephemeral=True)
         pending = player.music_queue.snapshot()
-        names = [f"🎵 再生中：{player.current.title if player.current else 'なし'}", f"📋 再生待ち：{len(pending)}曲"]
+        names = [f"🎵 กำลังเล่น: {player.current.title if player.current else 'ไม่มี'}", f"📋 รอเล่น: {len(pending)} เพลง"]
         names += [f"{idx}. {t.title}" for idx, t in enumerate(pending[:20], start=1)]
         if len(pending) > 20:
-            names.append(f"…残り{len(pending) - 20}曲")
+            names.append(f"…เหลืออีก {len(pending) - 20} เพลง")
         if not pending:
-            names.append("キューは空です。")
+            names.append("คิวเพลงว่างอยู่ค่ะ")
         await interaction.response.send_message("\n".join(names), ephemeral=True)
 
-    @app_commands.command(name="remove", description="再生待ちキューから指定番号の曲を削除")
-    @app_commands.describe(number="/queue に表示された番号（現在再生中の曲は含まない）")
+    @app_commands.command(name="remove", description="ลบเพลงตามหมายเลขออกจากคิว")
+    @app_commands.describe(number="หมายเลขเพลงจาก /queue ไม่รวมเพลงที่กำลังเล่น")
     async def remove(self, interaction: discord.Interaction, number: app_commands.Range[int, 1, 150]):
         try:
             player = self.bot.player_for_command(interaction)
             track = player.music_queue.remove(number)
-            await interaction.response.send_message(f"🗑️ {number}番の「{track.title}」を削除しました。", ephemeral=True)
+            await interaction.response.send_message(f"🗑️ ลบเพลงหมายเลข {number}: {track.title} แล้วค่ะ", ephemeral=True)
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
 
-    @app_commands.command(name="move", description="再生待ちキュー内の曲を並び替え")
+    @app_commands.command(name="move", description="เปลี่ยนลำดับเพลงในคิว")
     async def move(self, interaction: discord.Interaction, from_number: app_commands.Range[int, 1, 150], to_number: app_commands.Range[int, 1, 150]):
         try:
             player = self.bot.player_for_command(interaction)
             player.music_queue.move(from_number, to_number)
-            await interaction.response.send_message(f"🔀 {from_number}番を{to_number}番へ移動しました。", ephemeral=True)
+            await interaction.response.send_message(f"🔀 ย้ายเพลงจากลำดับ {from_number} ไป {to_number} แล้วค่ะ", ephemeral=True)
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
 
-    @app_commands.command(name="clear", description="現在の曲は止めず、再生待ちキューだけを空にする")
+    @app_commands.command(name="clear", description="ล้างคิวเพลงรอโดยไม่หยุดเพลงปัจจุบัน")
     async def clear(self, interaction: discord.Interaction):
         try:
             player = self.bot.player_for_command(interaction)
             count = len(player.music_queue)
             player.music_queue.clear()
-            await interaction.response.send_message(f"🧹 再生待ち{count}曲を削除しました。現在の曲は継続します。", ephemeral=True)
+            await interaction.response.send_message(f"🧹 ลบเพลงรอเล่น {count} เพลงแล้วค่ะ เพลงปัจจุบันยังเล่นต่อ", ephemeral=True)
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
 
-    @app_commands.command(name="shuffle", description="再生待ちの曲順をランダムに変更")
+    @app_commands.command(name="shuffle", description="สุ่มลำดับเพลงในคิว")
     async def shuffle(self, interaction: discord.Interaction):
         try:
             player = self.bot.player_for_command(interaction)
             player.music_queue.shuffle()
-            await interaction.response.send_message("🔀 再生待ちの曲順をシャッフルしました。", ephemeral=True)
+            await interaction.response.send_message("🔀 สุ่มลำดับเพลงเรียบร้อยค่ะ", ephemeral=True)
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
 
-    @app_commands.command(name="repeat", description="リピート方法を設定")
+    @app_commands.command(name="repeat", description="ตั้งค่าการเล่นเพลงซ้ำ")
     @app_commands.choices(mode=[
-        app_commands.Choice(name="オフ", value="off"),
-        app_commands.Choice(name="現在の曲を繰り返す", value="one"),
-        app_commands.Choice(name="キュー全体を繰り返す", value="all"),
+        app_commands.Choice(name="ปิด", value="off"),
+        app_commands.Choice(name="เล่นซ้ำเพลงเดียว", value="one"),
+        app_commands.Choice(name="เล่นซ้ำทั้งคิว", value="all"),
     ])
     async def repeat(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
         try:
             player = self.bot.player_for_command(interaction)
             player.repeat_mode = mode.value
-            await interaction.response.send_message(f"🔁 リピート：{mode.name}", ephemeral=True)
+            await interaction.response.send_message(f"🔁 ตั้งค่าเล่นซ้ำ: {mode.name} แล้วค่ะ", ephemeral=True)
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
 
-    @app_commands.command(name="nowplaying", description="現在再生中の曲を確認")
+    @app_commands.command(name="nowplaying", description="ดูเพลงที่กำลังเล่น")
     async def nowplaying(self, interaction: discord.Interaction):
         player = self.bot.guild_players.get(interaction.guild_id)
         if not player or not player.current:
-            return await interaction.response.send_message("現在再生している曲はありません。", ephemeral=True)
-        await interaction.response.send_message(f"🎶 {player.current.title}\nリクエスト：<@{player.current.requester}>", ephemeral=True)
+            return await interaction.response.send_message("ตอนนี้ยังไม่มีเพลงที่กำลังเล่นค่ะ", ephemeral=True)
+        await interaction.response.send_message(f"🎶 {player.current.title}\nขอเพลงโดย: <@{player.current.requester}>", ephemeral=True)
 
-    @app_commands.command(name="stop", description="音楽を停止してキューを消去（読み上げは継続）")
+    @app_commands.command(name="stop", description="หยุดเพลงและล้างคิว แต่ยังอ่านแชตต่อ")
     async def stop(self, interaction: discord.Interaction):
         try:
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
         player.stop_music()
-        await interaction.response.send_message("⏹️ 音楽を停止しました。", ephemeral=True)
+        await interaction.response.send_message("⏹️ ลิลินหยุดเพลงแล้วค่ะ", ephemeral=True)
 
-    @app_commands.command(name="volume", description="音楽の音量を0〜100で設定")
+    @app_commands.command(name="volume", description="ปรับระดับเสียงเพลงระหว่าง 0 ถึง 100")
     async def volume(self, interaction: discord.Interaction, percent: app_commands.Range[int, 0, 100]):
         try:
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
         player.mixer.music_volume = percent / 100
-        await interaction.response.send_message(f"音楽音量：{percent}%", ephemeral=True)
+        await interaction.response.send_message(f"ระดับเสียงเพลง: {percent}%", ephemeral=True)
 
-    @app_commands.command(name="leave", description="BotをVCから退出させる")
+    @app_commands.command(name="leave", description="ให้ลิลินออกจากห้องเสียง")
     async def leave(self, interaction: discord.Interaction):
         try:
             self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
         await self.bot.leave_guild(interaction.guild_id)
-        await interaction.response.send_message("👋 退出しました。読み上げも停止しました。", ephemeral=True)
+        await interaction.response.send_message("👋 ลิลินไปก่อนนะคะ หยุดอ่านแชตแล้วค่ะ 💜", ephemeral=True)
 
-    @app_commands.command(name="voice", description="自分のタイ語読み上げボイスを変更")
+    @app_commands.command(name="voice", description="เลือกเสียงอ่านประจำตัวของลิลิน")
     @app_commands.choices(voice=[app_commands.Choice(name=label, value=key) for key, label in db.VOICE_CHOICES.items()])
     async def voice(self, interaction: discord.Interaction, voice: app_commands.Choice[str]):
         db.set_voice(interaction.user.id, voice.value)
-        await interaction.response.send_message(f"読み上げボイス：{voice.name}", ephemeral=True)
+        await interaction.response.send_message(f"เสียงอ่านของลิลิน: {voice.name} 💜", ephemeral=True)

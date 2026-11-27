@@ -7,8 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 VOICE_CHOICES = {
-    "th-TH-PremwadeeNeural": "女性の声（Premwadee）",
-    "th-TH-NiwatNeural": "男性の声（Niwat）",
+    "th-TH-PremwadeeNeural": "ลิลิน — เสียงผู้หญิงภาษาไทยแบบ Neural",
 }
 DEFAULT_VOICE = "th-TH-PremwadeeNeural"
 MIN_RATE, MAX_RATE = -40, 40
@@ -71,10 +70,11 @@ def initialize():
             db.execute("ALTER TABLE preferences ADD COLUMN rate INTEGER NOT NULL DEFAULT 0")
         if "pitch" not in columns:
             db.execute("ALTER TABLE preferences ADD COLUMN pitch INTEGER NOT NULL DEFAULT 0")
-        # Older non-Thai voices are no longer eligible. Keep each user's other settings.
+        # Keep one consistent Lilin voice, migrating old male/non-Thai settings.
+        # Preserve users' speed, pitch, and playlist settings.
         db.execute(
-            "UPDATE preferences SET voice=? WHERE voice NOT IN (?, ?)",
-            (DEFAULT_VOICE, *VOICE_CHOICES.keys()),
+            "UPDATE preferences SET voice=? WHERE voice<>?",
+            (DEFAULT_VOICE, DEFAULT_VOICE),
         )
     try:
         database_path().chmod(0o600)
@@ -102,11 +102,11 @@ def set_voice(user_id: int | str, voice: str):
 
 def set_voice_config(user_id: int | str, voice: str, rate: int, pitch: int):
     if voice not in VOICE_CHOICES:
-        raise ValueError("タイ語のボイスのみ選択できます。")
+        raise ValueError("ลิลินใช้เสียงผู้หญิงภาษาไทยเพียงเสียงเดียวค่ะ")
     if not isinstance(rate, int) or not MIN_RATE <= rate <= MAX_RATE:
-        raise ValueError("話す速さが範囲外です。")
+        raise ValueError("ความเร็วในการพูดอยู่นอกช่วงที่กำหนด")
     if not isinstance(pitch, int) or not MIN_PITCH <= pitch <= MAX_PITCH:
-        raise ValueError("声の高さが範囲外です。")
+        raise ValueError("ระดับเสียงอยู่นอกช่วงที่กำหนด")
     with connect() as db:
         db.execute(
             "INSERT INTO preferences(user_id,voice,rate,pitch) VALUES (?,?,?,?) "
@@ -154,7 +154,7 @@ def add_playlist_item(user_id: str, guild_id: str, playlist_id: int, query: str)
             return False
         next_position = db.execute("SELECT COALESCE(MAX(position)+1, 0) FROM playlist_items WHERE playlist_id=?", (playlist_id,)).fetchone()[0]
         if next_position >= 100:
-            raise ValueError("A playlist may contain up to 100 songs")
+            raise ValueError("หนึ่งเพลย์ลิสต์เพิ่มได้สูงสุด 100 เพลงค่ะ")
         db.execute("INSERT INTO playlist_items(playlist_id,query,position) VALUES (?,?,?)", (playlist_id, query, next_position))
         return True
 

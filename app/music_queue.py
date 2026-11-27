@@ -26,7 +26,7 @@ class MusicQueue(Generic[T]):
 
     def add_many(self, tracks: list[T], *, front: bool = False):
         if len(self._items) + len(tracks) > self.max_size:
-            raise ValueError(f"再生待ちの上限は{self.max_size}曲です。")
+            raise ValueError(f"คิวเพลงรองรับได้สูงสุด {self.max_size} เพลงค่ะ")
         if front:
             # Preserve playlist order when multiple tracks are inserted at front.
             self._items.extendleft(reversed(tracks))
@@ -46,7 +46,7 @@ class MusicQueue(Generic[T]):
 
     def remove(self, position: int) -> T:
         if position < 1 or position > len(self._items):
-            raise ValueError("指定した番号の曲はキューにありません。")
+            raise ValueError("ไม่พบเพลงหมายเลขนี้ในคิวค่ะ")
         items = list(self._items)
         removed = items.pop(position - 1)
         self._items = deque(items)
@@ -56,7 +56,7 @@ class MusicQueue(Generic[T]):
 
     def move(self, source: int, destination: int):
         if min(source, destination) < 1 or max(source, destination) > len(self._items):
-            raise ValueError("移動元・移動先の番号を確認してください。")
+            raise ValueError("กรุณาตรวจสอบหมายเลขเพลงต้นทางและปลายทาง")
         items = list(self._items)
         items.insert(destination - 1, items.pop(source - 1))
         self._items = deque(items)

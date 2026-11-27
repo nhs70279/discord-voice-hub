@@ -1,10 +1,14 @@
-# Voice Hub — Discord読み上げ＆音楽Bot
+# リリン（ลิลิน）— タイ語読み上げ＆音楽Bot
+
+**キャラクター：リリン**。長い黒髪・紫の瞳・近未来の女王をモチーフにしたボットです。WebダッシュボードとDiscordコマンドの表示文はタイ語で統一。アバター画像は [`app/static/lilin-avatar.jpg`](app/static/lilin-avatar.jpg) にあり、Discord Developer PortalのBotアイコンとして設定できます。
+
+読み上げはリリン固有のタイ語女性ニューラル音声（`th-TH-PremwadeeNeural`）に統一しました。ユーザーごとの話速・音程設定は残し、初期値は声を不自然に変えない `0%` / `0 Hz` です。既存の男性声・他言語音声設定はDB起動時にリリンの声へ移行します（個人の話速、音程、プレイリストは保持）。「最も自然な声」の絶対評価はできず、実際の音質はEdge TTSサービスと文章に依存します。
 
 > **Fly.io無料枠向けの新しい構成：** [Fly.ioデプロイ手順（日本語）](docs/FLY_IO_JA.md)。`Dockerfile`・`fly.toml`・`.env.fly.example`・SQLiteバックアップ機能を追加しました。Oracle Cloud版の手順も引き続き使えます。
 
 > **Oracle Cloud Always Free + Cloudflare Tunnelで24時間稼働したい場合：** [タイ語のセットアップ手順](docs/ORACLE_CLOUDFLARE_TH.md) を参照してください。`deploy/oracle-install.sh` はUbuntu 24.04 ARM64用のインストーラー、`deploy/voicehub.service` は自動起動用のsystemdユニット、`.env.oracle.example` は本番用設定テンプレートです。Discord・Oracle・Cloudflareのアカウントでの実運用テストは未実施です。
 
-Discordで `/join` すると、BotがVCに入り、そのコマンドを実行したテキストチャンネルの読み上げを自動開始します。`/play` は曲名・YouTube動画URL・YouTubeプレイリストURL（最大30件）に対応し、Web画面から個人別ボイスと保存プレイリストを管理できます。
+Discordで `/join` すると、リリンがVCに入り、そのコマンドを実行したテキストチャンネルの読み上げを自動開始します。`/play` は曲名・YouTube動画URL・YouTubeプレイリストURL（最大30件）に対応し、Web画面（タイ語UI）から話速・声の高さと保存プレイリストを管理できます。
 
 ## できること
 
@@ -24,11 +28,11 @@ Discordで `/join` すると、BotがVCに入り、そのコマンドを実行�
 | `/shuffle` | 再生待ちの曲順をランダムに変更 |
 | `/repeat off/one/all` | リピートなし／現在の曲／キュー全体 |
 | `/nowplaying`, `/volume` | 現在の曲の確認・音楽音量変更 |
-| `/voice` | 自分の読み上げ音声をDiscordから変更 |
+| `/voice` | リリンの固定タイ語女性ボイスを確認 |
 | `/leave` | Bot退出・読み上げ終了 |
-| Webダッシュボード | Discordログイン・タイ語ボイス変更・音楽キューの追加／優先再生／指定削除／並び替え／操作、プレイリスト作成／曲追加／削除／再生・管理者による読み上げチャンネル設定 |
+| Webダッシュボード | タイ語表示・Discordログイン・話速／音程設定・音楽キューの追加／優先再生／指定削除／並び替え／操作、プレイリスト作成／曲追加／削除／再生・管理者による読み上げチャンネル設定 |
 
-読み上げ中は音楽の音量を自動で約28%に下げ、終わると元に戻します。キューを読み上げ用と音楽用に分けてあるので、読み上げと音楽は共存します。**読み上げ音声はタイ語（th-TH）のみ**。個人ごとに女性声／男性声、話す速さ（−40〜＋40%）、声の高さ（−30〜＋30 Hz）を保存できます。日本語・英語のボイス選択はありません。文章の自動翻訳は行いません。
+読み上げ中は音楽の音量を自動で約28%に下げ、終わると元に戻します。キューを読み上げ用と音楽用に分けてあるので、読み上げと音楽は共存します。**読み上げ音声はリリンのタイ語女性声のみ**。個人ごとに話す速さ（−40〜＋40%）、声の高さ（−30〜＋30 Hz）を保存できます。日本語・英語・男性ボイスの選択はありません。文章の自動翻訳は行いません。
 
 **キューの番号について：** `/queue` には「再生中」と「再生待ち」が別々に表示されます。`/remove 2` は再生待ちリストの2番だけを削除します（再生中の曲は消しません）。`/next` は再生中の曲が終わった直後に割り込み、`/playnow` は現在の曲を途中で切り替えます。プレイリストURLを指定した場合、登録順を維持します。
 
@@ -65,10 +69,12 @@ app/
   server.py       Discord OAuth2 / Web API / Bot起動
   bot.py          Discord Slash Commands / 新規チャット検知
   player.py       音楽検索 / TTSキュー / 音声合成・ミキサー
+  tts_text.py     タイ語読み上げ向けDiscordチャット整形
   music_queue.py  順番変更・指定削除・優先キュー管理
   audio_mix.py    48kHz PCM音声の混合
   db.py           SQLite / ユーザー設定 / プレイリスト保存
-  static/index.html   ダッシュボードUI
+  static/index.html   タイ語ダッシュボードUI
+  static/lilin-avatar.jpg   リリンのキャラクターアイコン
 tests/test_core.py      音声混合・保存ロジック検証
 ```
 

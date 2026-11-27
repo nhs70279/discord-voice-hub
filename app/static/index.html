@@ -1,17 +1,19 @@
 <!doctype html>
-<html lang="ja">
+<html lang="th">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0d1021">
-  <title>Voice Hub — Discordの声と音楽を、ひとつに。</title>
+  <meta name="description" content="ลิลิน ผู้ช่วยเสียงภาษาไทยและผู้ดูแลเพลงบน Discord ของคุณ">
+  <link rel="icon" type="image/jpeg" href="/static/lilin-avatar.jpg">
+  <title>ลิลิน | ผู้ช่วยเสียงและเพลงบน Discord</title>
   <style>
-    :root { font-family: Inter,"Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif; color:#f2f3ff; background:#0d1021; font-synthesis:none; }
+    :root { font-family: "Noto Sans Thai",Tahoma,Inter,system-ui,sans-serif; color:#f2f3ff; background:#0d1021; font-synthesis:none; }
     * {box-sizing:border-box} body{margin:0} button,input,select{font:inherit} button{cursor:pointer} button:disabled{cursor:not-allowed;opacity:.45}
     :focus-visible{outline:3px solid #b6aeff;outline-offset:3px} .app{min-height:100vh;display:grid;grid-template-columns:268px minmax(0,1fr)}
     .sidebar{padding:32px 22px;background:#101326;border-right:1px solid #262b48;display:flex;flex-direction:column;gap:32px}
     .brand{display:flex;align-items:center;gap:12px;font-weight:800;font-size:21px;letter-spacing:-.05em}
-    .brand-icon{height:42px;width:42px;background:linear-gradient(145deg,#9b8bff,#5f71e9);border-radius:15px;display:grid;place-items:center;box-shadow:0 12px 30px #6557e93b;font-size:22px}
+    .brand-icon{height:46px;width:46px;object-fit:cover;object-position:center;border:2px solid #987afc;border-radius:16px;box-shadow:0 12px 30px #6557e93b}
     .small-title{text-transform:uppercase;color:#777f9f;font-weight:700;font-size:11px;letter-spacing:.15em;margin:0 0 12px}
     .sidebar select,.field,select{width:100%;border:1px solid #333954;background:#171b33;color:#f8f8ff;border-radius:12px;padding:13px 14px;min-height:46px;outline-offset:2px}
     nav{display:grid;gap:6px} .nav-item{padding:12px 14px;border:0;border-radius:11px;background:transparent;color:#9a9fbb;text-align:left;font-weight:600}
@@ -26,7 +28,7 @@
     .pill{padding:10px 15px;color:#b1b6d1;background:#1a1e34;border:1px solid #313653;border-radius:999px;white-space:nowrap;font-size:12px;font-weight:650}
     .hero{border-radius:24px;background:linear-gradient(113deg,#3d357e 0%,#232b69 54%,#17234a 100%);border:1px solid #5b58a1;display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:clamp(24px,4vw,42px);position:relative;overflow:hidden;margin-bottom:26px}
     .hero:after{content:"";position:absolute;width:310px;height:310px;border:40px solid #9b85ff20;border-radius:100%;right:-78px;top:-130px;pointer-events:none}.hero h2{font-size:23px;letter-spacing:-.04em;margin:0 0 9px}.hero p{margin:0;color:#d0cff8;max-width:560px}
-    .hero-icon{font-size:70px;line-height:1;opacity:.75;transform:rotate(-12deg)}
+    .hero-avatar{width:132px;height:132px;object-fit:cover;border:3px solid #b9a2ff;border-radius:26px;box-shadow:0 14px 36px #0d092c88;position:relative;z-index:1}
     .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px;align-items:start}
     .panel{background:#171b30;border:1px solid #303654;border-radius:20px;padding:26px;min-width:0;box-shadow:0 16px 52px #0809191b}
     .panel.wide{grid-column:1/-1}.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.head h2{font-size:19px;margin:0;letter-spacing:-.035em}
@@ -43,53 +45,53 @@
     .login-wrap{min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 70% 20%,#37347b65,transparent 40%),#0d1021}
     .login-card{max-width:500px;width:100%;padding:42px;background:#171b30;border:1px solid #363b5f;border-radius:25px}.login-card h1{margin:25px 0 18px}.login-card p{color:#b6bcd5;margin:0 0 28px}.login-card .button{display:block;text-align:center;text-decoration:none}
     .toast{position:fixed;bottom:24px;right:24px;max-width:min(440px,90vw);background:#292d4e;color:#fff;border:1px solid #726ab8;border-radius:12px;padding:15px 20px;box-shadow:0 16px 50px #0007;z-index:10}
-    @media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{padding:18px 20px;gap:14px;border-right:0;border-bottom:1px solid #282e4c}.sidebar .small-title,.sidebar nav,.side-bottom{display:none}.sidebar select{max-width:340px}main{padding:28px 20px}.topline{margin-bottom:25px}.grid{grid-template-columns:1fr}.panel.wide{grid-column:auto}.hero-icon{font-size:40px}}
-    @media(max-width:520px){.panel{padding:19px}.hero{grid-template-columns:1fr}.hero-icon{display:none}.pill{display:none}.field-row{flex-wrap:wrap}.field-row button{width:100%}.login-card{padding:27px}}
+    @media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{padding:18px 20px;gap:14px;border-right:0;border-bottom:1px solid #282e4c}.sidebar .small-title,.sidebar nav,.side-bottom{display:none}.sidebar select{max-width:340px}main{padding:28px 20px}.topline{margin-bottom:25px}.grid{grid-template-columns:1fr}.panel.wide{grid-column:auto}.hero-avatar{width:100px;height:100px}}
+    @media(max-width:520px){.panel{padding:19px}.hero{grid-template-columns:1fr}.hero-avatar{width:94px;height:94px}.pill{display:none}.field-row{flex-wrap:wrap}.field-row button{width:100%}.login-card{padding:27px}}
   </style>
 </head>
 <body>
   <div class="login-wrap hidden" id="login">
     <div class="login-card">
-      <div class="brand"><div class="brand-icon">♫</div> Voice Hub</div>
-      <p class="eyebrow" style="margin-top:30px">ONE VOICE, ALL YOUR MUSIC</p>
-      <h1>Discordの声と音楽を、<br>ひとつに。</h1>
-      <p>あなた専用の読み上げボイスと、お気に入りのプレイリストを管理。Discordアカウントでログインして始めましょう。</p>
-      <a class="button" href="/auth/login">Discordでログイン</a>
-      <p class="hint">サーバーのメンバー確認のため「identify」「guilds」権限を利用します。</p>
+      <div class="brand"><img class="brand-icon" src="/static/lilin-avatar.jpg" alt="ลิลิน"> ลิลิน</div>
+      <p class="eyebrow" style="margin-top:30px">ผู้ช่วยเสียงประจำเซิร์ฟเวอร์ของคุณ</p>
+      <h1>สวัสดีค่ะ ฉันชื่อลิลิน 💜</h1>
+      <p>ฉันจะอ่านแชตภาษาไทยด้วยเสียงนุ่มนวล และช่วยดูแลเพลง คิวเพลง และเพลย์ลิสต์บน Discord ให้คุณค่ะ</p>
+      <a class="button" href="/auth/login">เข้าสู่ระบบด้วย Discord</a>
+      <p class="hint">ใช้สิทธิ์ identify และ guilds เพื่อตรวจสอบเซิร์ฟเวอร์ที่คุณเป็นสมาชิกเท่านั้น</p>
     </div>
   </div>
   <div class="app hidden" id="app">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-icon">♫</div> Voice Hub</div>
-      <div><p class="small-title">SERVER</p><label class="label" for="guild">管理するサーバー</label><select id="guild"></select></div>
-      <nav aria-label="メニュー">
-        <button class="nav-item active" data-target="read-panel">◉　読み上げ設定</button>
-        <button class="nav-item" data-target="queue-panel">▶　音楽キュー</button>
-        <button class="nav-item" data-target="playlists-panel">♫　プレイリスト</button>
-        <button class="nav-item" data-target="channel-panel">⚙　チャンネル設定</button>
+      <div class="brand"><img class="brand-icon" src="/static/lilin-avatar.jpg" alt="ลิลิน"> ลิลิน</div>
+      <div><p class="small-title">เซิร์ฟเวอร์</p><label class="label" for="guild">เลือกเซิร์ฟเวอร์</label><select id="guild"></select></div>
+      <nav aria-label="เมนูหลัก">
+        <button class="nav-item active" data-target="read-panel">◉　ตั้งค่าเสียงอ่าน</button>
+        <button class="nav-item" data-target="queue-panel">▶　คิวเพลง</button>
+        <button class="nav-item" data-target="playlists-panel">♫　เพลย์ลิสต์</button>
+        <button class="nav-item" data-target="channel-panel">⚙　ตั้งค่าช่องแชต</button>
       </nav>
-      <div class="side-bottom"><span class="status"><span id="dot" class="dot"></span><span id="status">接続を確認中</span></span><span id="username"></span><button class="logout" id="logout">ログアウト</button></div>
+      <div class="side-bottom"><span class="status"><span id="dot" class="dot"></span><span id="status">กำลังตรวจสอบการเชื่อมต่อ</span></span><span id="username"></span><button class="logout" id="logout">ออกจากระบบ</button></div>
     </aside>
     <main>
-      <div class="topline"><div><p class="eyebrow">YOUR DISCORD CONTROL ROOM</p><h1>ダッシュボード</h1><p class="muted">読み上げの声も、音楽の時間も。自分らしくカスタマイズ。</p></div><span class="pill">Voice & Music Management</span></div>
-      <section class="hero"><div><p class="eyebrow">QUICK START</p><h2>VCで <code>/join</code> を実行するだけ。</h2><p>Botが参加すると、そのテキストチャンネルのチャット読み上げを自動的に開始します。</p></div><span class="hero-icon">🎧</span></section>
+      <div class="topline"><div><p class="eyebrow">พื้นที่ส่วนตัวของคุณกับลิลิน</p><h1>แผงควบคุม</h1><p class="muted">ตั้งค่าเสียงอ่าน จัดคิวเพลง และสร้างเพลย์ลิสต์ได้ในที่เดียว</p></div><span class="pill">ผู้ช่วยเสียงและเพลง</span></div>
+      <section class="hero"><div><p class="eyebrow">เริ่มต้นกับลิลิน</p><h2>พิมพ์ <code>/join</code> ใน Discord ได้เลยค่ะ</h2><p>เมื่อฉันเข้าห้องเสียงแล้ว จะเริ่มอ่านข้อความจากช่องแชตที่เลือกให้อัตโนมัติ 💜</p></div><img class="hero-avatar" src="/static/lilin-avatar.jpg" alt="ลิลิน ราชินีแห่งโลกอนาคต"></section>
       <div class="grid">
-        <section class="panel" id="read-panel"><div class="head"><h2>🔊 自分の読み上げボイス</h2><span class="pill">ภาษาไทย</span></div><p class="sub">読み上げ言語はタイ語固定。自分のメッセージをどんな声で読み上げるか設定できます。サーバーをまたいで共通です。</p><label class="label" for="voice">声の種類</label><select id="voice"></select><div class="voice-range"><div class="voice-range-label"><label class="label" for="rate">話す速さ</label><strong class="voice-range-value" id="rate-value">標準</strong></div><input type="range" class="voice-slider" id="rate" min="-40" max="40" step="5" value="0"><div class="range-ends"><span>ゆっくり</span><span>速い</span></div></div><div class="voice-range"><div class="voice-range-label"><label class="label" for="pitch">声の高さ</label><strong class="voice-range-value" id="pitch-value">標準</strong></div><input type="range" class="voice-slider" id="pitch" min="-30" max="30" step="5" value="0"><div class="range-ends"><span>低い</span><span>高い</span></div></div><div class="section-actions"><button class="button" id="save-voice">声の設定を保存</button><button class="button secondary" id="reset-voice">標準に戻す</button></div><p class="hint">声はタイ語の女性／男性から選択。文字の自動翻訳は行いません。</p></section>
-        <section class="panel" id="channel-panel"><div class="head"><h2>＃ 読み上げチャンネル</h2></div><p class="sub">Botが読み上げるテキストチャンネルを指定します。サーバーの管理権限が必要です。</p><label class="label" for="channel">対象チャンネル</label><select id="channel"></select><div class="section-actions"><button class="button secondary" id="save-channel">チャンネルを保存</button></div><p class="hint">Discordの <code>/join</code> からも設定できます。</p></section>
-        <section class="panel wide" id="queue-panel"><div class="head"><h2>▶ 音楽再生・キュー管理</h2><span class="pill" id="queue-count">再生待ち 0 曲</span></div><p class="sub">曲名やYouTube URLを入力。通常再生・次に再生・今すぐ再生を使い分けられます。</p>
-          <div class="queue-now"><p class="eyebrow">NOW PLAYING</p><strong id="now-playing">BotはVCに接続していません</strong><p class="hint" id="music-state" style="margin-top:8px">/join で接続</p></div>
-          <label class="label" for="queue-query">再生する曲</label><input class="field" id="queue-query" maxlength="400" placeholder="曲名 / YouTube URL / プレイリストURL">
-          <div class="section-actions"><button class="button" id="queue-play">＋ キューに追加</button><button class="button secondary" id="queue-next">次に再生</button><button class="button secondary" id="queue-now">今すぐ再生</button></div>
-          <div class="section-actions"><button class="button secondary" data-qcommand="pause">一時停止</button><button class="button secondary" data-qcommand="resume">再開</button><button class="button secondary" data-qcommand="skip">スキップ</button><button class="button secondary" data-qcommand="shuffle">シャッフル</button><button class="button secondary" data-qcommand="clear">待ち曲をすべて削除</button><button class="button danger" data-qcommand="stop">全停止</button></div>
-          <div class="section-actions"><label class="label" for="queue-repeat" style="margin:0">リピート</label><select id="queue-repeat" style="max-width:220px"><option value="off">オフ</option><option value="one">1曲リピート</option><option value="all">全曲リピート</option></select><button class="button secondary" id="save-repeat">変更</button></div>
-          <div class="head" style="margin-top:26px"><h3 style="margin:0;font-size:16px">再生待ち一覧</h3><button class="button secondary" id="queue-refresh">更新</button></div><p class="hint" style="margin-top:0">番号は再生待ちの曲のみ。▲・▼で順番変更、削除で指定曲だけ取り除きます。</p><div class="list" id="queue-list"></div>
+        <section class="panel" id="read-panel"><div class="head"><h2>🔊 เสียงอ่านของลิลิน</h2><span class="pill">ภาษาไทย</span></div><p class="sub">ลิลินใช้เสียงผู้หญิงภาษาไทยแบบ Neural เพื่อให้น้ำเสียงเป็นธรรมชาติ คุณสามารถปรับความเร็วและระดับเสียงของข้อความตัวเองได้</p><label class="label" for="voice">เสียงประจำตัวของลิลิน</label><select id="voice" disabled></select><div class="voice-range"><div class="voice-range-label"><label class="label" for="rate">ความเร็วในการพูด</label><strong class="voice-range-value" id="rate-value">ปกติ</strong></div><input type="range" class="voice-slider" id="rate" min="-40" max="40" step="5" value="0"><div class="range-ends"><span>ช้า</span><span>เร็ว</span></div></div><div class="voice-range"><div class="voice-range-label"><label class="label" for="pitch">ระดับเสียง</label><strong class="voice-range-value" id="pitch-value">ปกติ</strong></div><input type="range" class="voice-slider" id="pitch" min="-30" max="30" step="5" value="0"><div class="range-ends"><span>ทุ้ม</span><span>แหลม</span></div></div><div class="section-actions"><button class="button" id="save-voice">บันทึกการตั้งค่าเสียง</button><button class="button secondary" id="reset-voice">คืนค่าเริ่มต้น</button></div><p class="hint">เพื่อเสียงที่เป็นธรรมชาติที่สุด แนะนำให้ใช้ความเร็วและระดับเสียงปกติ ไม่มีการแปลข้อความอัตโนมัติ</p></section>
+        <section class="panel" id="channel-panel"><div class="head"><h2>＃ ช่องแชตที่ให้อ่าน</h2></div><p class="sub">เลือกช่องข้อความที่ต้องการให้ลิลินอ่านออกเสียง ต้องมีสิทธิ์จัดการเซิร์ฟเวอร์</p><label class="label" for="channel">ช่องข้อความ</label><select id="channel"></select><div class="section-actions"><button class="button secondary" id="save-channel">บันทึกช่องแชต</button></div><p class="hint">คุณสามารถเลือกช่องด้วยคำสั่ง <code>/join</code> ใน Discord ได้เช่นกัน</p></section>
+        <section class="panel wide" id="queue-panel"><div class="head"><h2>▶ เล่นเพลงและจัดคิว</h2><span class="pill" id="queue-count">รอเล่น 0 เพลง</span></div><p class="sub">ค้นหาด้วยชื่อเพลงหรือลิงก์ YouTube แล้วเลือกเพิ่มในคิว เล่นเพลงถัดไป หรือเล่นทันทีได้เลยค่ะ</p>
+          <div class="queue-now"><p class="eyebrow">กำลังเล่น</p><strong id="now-playing">ลิลินยังไม่ได้เข้าห้องเสียง</strong><p class="hint" id="music-state" style="margin-top:8px">ใช้คำสั่ง /join เพื่อเชื่อมต่อ</p></div>
+          <label class="label" for="queue-query">เพลงที่ต้องการฟัง</label><input class="field" id="queue-query" maxlength="400" placeholder="ชื่อเพลง / ลิงก์ YouTube / ลิงก์เพลย์ลิสต์">
+          <div class="section-actions"><button class="button" id="queue-play">＋ เพิ่มเข้าคิว</button><button class="button secondary" id="queue-next">เล่นถัดไป</button><button class="button secondary" id="queue-now">เล่นทันที</button></div>
+          <div class="section-actions"><button class="button secondary" data-qcommand="pause">หยุดชั่วคราว</button><button class="button secondary" data-qcommand="resume">เล่นต่อ</button><button class="button secondary" data-qcommand="skip">ข้ามเพลง</button><button class="button secondary" data-qcommand="shuffle">สุ่มลำดับ</button><button class="button secondary" data-qcommand="clear">ล้างคิวรอ</button><button class="button danger" data-qcommand="stop">หยุดเพลงทั้งหมด</button></div>
+          <div class="section-actions"><label class="label" for="queue-repeat" style="margin:0">เล่นซ้ำ</label><select id="queue-repeat" style="max-width:220px"><option value="off">ปิด</option><option value="one">ซ้ำเพลงเดียว</option><option value="all">ซ้ำทั้งคิว</option></select><button class="button secondary" id="save-repeat">บันทึก</button></div>
+          <div class="head" style="margin-top:26px"><h3 style="margin:0;font-size:16px">เพลงที่รอเล่น</h3><button class="button secondary" id="queue-refresh">รีเฟรช</button></div><p class="hint" style="margin-top:0">ใช้ ▲ และ ▼ เพื่อสลับลำดับเพลง หรือกดลบเพื่อนำเพลงนั้นออกจากคิว</p><div class="list" id="queue-list"></div>
         </section>
-        <section class="panel wide" id="playlists-panel"><div class="head"><h2>♫ マイプレイリスト</h2><span class="pill" id="playlist-count">0 playlists</span></div><p class="sub">曲名でもYouTube URLでも登録できます。作成したリストは自分だけが編集できます。</p>
-          <div class="field-row"><input id="playlist-name" class="field" maxlength="60" placeholder="新しいプレイリスト名（例：作業用BGM）" aria-label="プレイリスト名"><button class="button" id="create-playlist">＋ 作成</button></div>
-          <div class="grid" style="margin-top:22px"><div><span class="label">保存したリスト</span><div id="playlist-list" class="list"></div></div><div><span class="label" id="current-playlist-name">曲一覧</span><div id="playlist-editor" class="hidden"><div class="field-row"><input id="track-query" class="field" maxlength="400" placeholder="曲名 または YouTube URL" aria-label="曲名またはURL"><button class="button secondary" id="add-track">追加</button></div><div class="list" id="track-list"></div><div class="section-actions"><button class="button" id="play-list">▶ リストを再生</button><button class="button danger" id="delete-list">リストを削除</button></div></div><div class="empty" id="playlist-placeholder">左からプレイリストを選ぶと、曲を追加・管理できます。</div></div></div>
+        <section class="panel wide" id="playlists-panel"><div class="head"><h2>♫ เพลย์ลิสต์ของฉัน</h2><span class="pill" id="playlist-count">0 เพลย์ลิสต์</span></div><p class="sub">เก็บเพลงด้วยชื่อหรือลิงก์ YouTube ได้ตามต้องการ เฉพาะคุณเท่านั้นที่แก้ไขเพลย์ลิสต์ของตัวเองได้</p>
+          <div class="field-row"><input id="playlist-name" class="field" maxlength="60" placeholder="ชื่อเพลย์ลิสต์ใหม่ เช่น เพลงฟังตอนทำงาน" aria-label="ชื่อเพลย์ลิสต์"><button class="button" id="create-playlist">＋ สร้าง</button></div>
+          <div class="grid" style="margin-top:22px"><div><span class="label">เพลย์ลิสต์ที่บันทึกไว้</span><div id="playlist-list" class="list"></div></div><div><span class="label" id="current-playlist-name">รายการเพลง</span><div id="playlist-editor" class="hidden"><div class="field-row"><input id="track-query" class="field" maxlength="400" placeholder="ชื่อเพลงหรือลิงก์ YouTube" aria-label="ชื่อเพลงหรือลิงก์"><button class="button secondary" id="add-track">เพิ่ม</button></div><div class="list" id="track-list"></div><div class="section-actions"><button class="button" id="play-list">▶ เล่นเพลย์ลิสต์</button><button class="button danger" id="delete-list">ลบเพลย์ลิสต์</button></div></div><div class="empty" id="playlist-placeholder">เลือกเพลย์ลิสต์ทางซ้ายเพื่อเพิ่มหรือจัดการเพลงค่ะ</div></div></div>
         </section>
       </div>
-      <p class="footer">YouTubeからの音声抽出・バックグラウンド再生には利用条件上の制限があります。音源の利用許諾と各サービスの条件をご確認ください。<br>Botの音声機能は別途サーバーで常時稼働させる必要があります。</p>
+      <p class="footer">การเล่นเสียงจาก YouTube อาจมีข้อจำกัดตามเงื่อนไขการใช้งาน โปรดตรวจสอบสิทธิ์ในเนื้อหาและข้อกำหนดของบริการ<br>ลิลินต้องทำงานอยู่บนเซิร์ฟเวอร์เพื่ออ่านแชตและเล่นเพลงใน Discord</p>
     </main>
   </div>
   <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
@@ -100,7 +102,7 @@
       const options={method,credentials:'same-origin',headers:{}};
       if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}
       const response=await fetch(path,options);
-      if(!response.ok){let message='操作に失敗しました';try{message=(await response.json()).detail||message}catch{}throw new Error(message)}
+      if(!response.ok){let message='ทำรายการไม่สำเร็จ กรุณาลองอีกครั้ง';try{message=(await response.json()).detail||message}catch{}throw new Error(message)}
       return response.status===204?null:response.json();
     }
     let toastTimer;
@@ -110,8 +112,8 @@
     async function action(fn){try{await fn()}catch(e){notify(e.message)}}
     function selectedGuild(){return me.guilds.find(g=>g.id===guildId)}
     async function refreshGuild(){
-      playlistId=null;$('playlist-editor').classList.add('hidden');$('playlist-placeholder').classList.remove('hidden');$('current-playlist-name').textContent='曲一覧';
-      if(!guildId){$('playlist-list').replaceChildren(el('div','empty','Botが参加しているサーバーがありません。'));$('queue-list').replaceChildren();return}
+      playlistId=null;$('playlist-editor').classList.add('hidden');$('playlist-placeholder').classList.remove('hidden');$('current-playlist-name').textContent='รายการเพลง';
+      if(!guildId){$('playlist-list').replaceChildren(el('div','empty','ยังไม่มีเซิร์ฟเวอร์ที่มีลิลินอยู่ค่ะ'));$('queue-list').replaceChildren();return}
       const current=selectedGuild();$('save-channel').disabled=!current.admin;
       const [channels,settings,playlists]=await Promise.all([api(`/api/guilds/${guildId}/channels`),api(`/api/guilds/${guildId}/settings`),api(`/api/guilds/${guildId}/playlists`)]);
       $('channel').replaceChildren();for(const c of channels)option($('channel'),c.id,'# '+c.name);
@@ -122,63 +124,63 @@
     async function refreshQueue(){
       if(!guildId)return;
       const q=await api(`/api/guilds/${guildId}/queue`);
-      $('now-playing').textContent=q.connected?(q.now_playing?.title||'現在再生中の曲はありません'):'BotはVCに接続していません';
-      $('music-state').textContent=q.connected?(q.paused?'音楽は一時停止中':'音楽操作が可能です'):'Discordで /join を実行してください';
-      $('queue-count').textContent=`再生待ち ${q.upcoming.length} 曲`;$('queue-repeat').value=q.repeat;
+      $('now-playing').textContent=q.connected?(q.now_playing?.title||'ยังไม่มีเพลงที่กำลังเล่น'):'ลิลินยังไม่ได้เข้าห้องเสียง';
+      $('music-state').textContent=q.connected?(q.paused?'หยุดเพลงชั่วคราวอยู่':'พร้อมควบคุมเพลงแล้วค่ะ'):'พิมพ์ /join ใน Discord เพื่อเชื่อมต่อ';
+      $('queue-count').textContent=`รอเล่น ${q.upcoming.length} เพลง`;$('queue-repeat').value=q.repeat;
       $('queue-list').replaceChildren();
-      if(!q.upcoming.length){$('queue-list').append(el('div','empty','再生待ちはありません。曲名またはURLを追加してください。'));return}
+      if(!q.upcoming.length){$('queue-list').append(el('div','empty','ยังไม่มีเพลงรอเล่น เพิ่มชื่อเพลงหรือลิงก์ได้เลยค่ะ'));return}
       for(const track of q.upcoming){
         const row=el('div','item');row.append(el('span','queue-number',track.number+'.'));row.append(el('span','item-title queue-item-title',track.title));
         const controls=el('div','mini-actions');
         for(const [label,dest] of [['▲',track.number-1],['▼',track.number+1]]){
           const button=el('button','',label);button.disabled=dest<1||dest>q.upcoming.length;
-          button.setAttribute('aria-label',`${track.title}を${label==='▲'?'前':'後ろ'}に移動`);
+          button.setAttribute('aria-label',`ย้าย ${track.title} ไป${label==='▲'?'ก่อนหน้า':'ถัดไป'}`);
           button.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/move`,'POST',{from_number:track.number,to_number:dest});await refreshQueue()});controls.append(button)
         }
-        const remove=el('button','','削除');remove.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/${track.number}`,'DELETE');await refreshQueue()});controls.append(remove);row.append(controls);$('queue-list').append(row)
+        const remove=el('button','','ลบ');remove.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/${track.number}`,'DELETE');await refreshQueue()});controls.append(remove);row.append(controls);$('queue-list').append(row)
       }
     }
     async function sendMusic(mode){
-      if(!guildId)throw Error('先にBotをサーバーに追加してください');const query=$('queue-query').value.trim();if(!query)throw Error('曲名かURLを入力してください');
-      const result=await api(`/api/guilds/${guildId}/queue`,'POST',{query,mode});$('queue-query').value='';notify(result.queued+'曲を追加しました');await refreshQueue();
+      if(!guildId)throw Error('โปรดเพิ่มลิลินเข้าเซิร์ฟเวอร์ก่อนค่ะ');const query=$('queue-query').value.trim();if(!query)throw Error('กรุณาใส่ชื่อเพลงหรือลิงก์');
+      const result=await api(`/api/guilds/${guildId}/queue`,'POST',{query,mode});$('queue-query').value='';notify(`เพิ่มเพลงแล้ว ${result.queued} เพลง`);await refreshQueue();
     }
     function drawPlaylists(items){
-      $('playlist-count').textContent=items.length+' playlists';$('playlist-list').replaceChildren();
-      if(!items.length){$('playlist-list').append(el('div','empty','まだリストがありません。好きな名前で作ってみましょう。'));return}
-      for(const p of items){const item=el('div','item'+(p.id===playlistId?' selected':''));item.append(el('span','item-title',p.name));const button=el('button','','編集する');button.onclick=()=>action(()=>openPlaylist(p.id));item.append(button);$('playlist-list').append(item)}
+      $('playlist-count').textContent=`${items.length} เพลย์ลิสต์`;$('playlist-list').replaceChildren();
+      if(!items.length){$('playlist-list').append(el('div','empty','ยังไม่มีเพลย์ลิสต์ ลองสร้างรายการโปรดของคุณดูนะคะ'));return}
+      for(const p of items){const item=el('div','item'+(p.id===playlistId?' selected':''));item.append(el('span','item-title',p.name));const button=el('button','','แก้ไข');button.onclick=()=>action(()=>openPlaylist(p.id));item.append(button);$('playlist-list').append(item)}
     }
     async function openPlaylist(id){
       playlistId=id;const p=await api(`/api/guilds/${guildId}/playlists/${id}`);$('current-playlist-name').textContent=p.name;
       $('playlist-editor').classList.remove('hidden');$('playlist-placeholder').classList.add('hidden');$('track-list').replaceChildren();
-      if(!p.items.length)$('track-list').append(el('div','empty','このリストは空です。曲名またはURLを追加しましょう。'));
-      for(const track of p.items){const item=el('div','item');item.append(el('span','item-title',track.query));const remove=el('button','','削除');remove.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/playlists/${id}/items/${track.id}`,'DELETE');await openPlaylist(id)});item.append(remove);$('track-list').append(item)}
+      if(!p.items.length)$('track-list').append(el('div','empty','รายการนี้ยังว่างอยู่ เพิ่มเพลงหรือลิงก์ได้เลยค่ะ'));
+      for(const track of p.items){const item=el('div','item');item.append(el('span','item-title',track.query));const remove=el('button','','ลบ');remove.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/playlists/${id}/items/${track.id}`,'DELETE');await openPlaylist(id)});item.append(remove);$('track-list').append(item)}
       drawPlaylists(await api(`/api/guilds/${guildId}/playlists`));
     }
     async function bootstrap(){
       try{me=await api('/api/me')}catch(e){$('login').classList.remove('hidden');return}
-      $('app').classList.remove('hidden');$('username').textContent='ログイン中：'+me.name;
-      $('status').textContent=me.bot_online?'Botオンライン':'Botオフライン／設定待ち';$('dot').classList.toggle('online',me.bot_online);
+      $('app').classList.remove('hidden');$('username').textContent='เข้าสู่ระบบ: '+me.name;
+      $('status').textContent=me.bot_online?'ลิลินออนไลน์แล้ว':'ลิลินออฟไลน์ / รอการตั้งค่า';$('dot').classList.toggle('online',me.bot_online);
       $('voice').replaceChildren();for(const [name,label] of Object.entries(me.voices))option($('voice'),name,label);$('voice').value=me.voice_settings.voice;$('rate').value=me.voice_settings.rate;$('pitch').value=me.voice_settings.pitch;renderVoiceNumbers();
       $('guild').replaceChildren();for(const g of me.guilds)option($('guild'),g.id,g.name+(g.connected?' ●':''));
-      if(!me.guilds.length)option($('guild'),'','Botがいるサーバーがありません');guildId=me.guilds[0]?.id;
+      if(!me.guilds.length)option($('guild'),'','ไม่พบเซิร์ฟเวอร์ที่มีลิลิน');guildId=me.guilds[0]?.id;
       await action(refreshGuild);
     }
     $('guild').onchange=()=>action(async()=>{guildId=$('guild').value;await refreshGuild()});
-    function renderVoiceNumbers(){const rate=Number($('rate').value),pitch=Number($('pitch').value);$('rate-value').textContent=rate===0?'標準':`${rate>0?'+':''}${rate}%`;$('pitch-value').textContent=pitch===0?'標準':`${pitch>0?'+':''}${pitch} Hz`}
+    function renderVoiceNumbers(){const rate=Number($('rate').value),pitch=Number($('pitch').value);$('rate-value').textContent=rate===0?'ปกติ':`${rate>0?'+':''}${rate}%`;$('pitch-value').textContent=pitch===0?'ปกติ':`${pitch>0?'+':''}${pitch} Hz`}
     $('rate').oninput=renderVoiceNumbers;$('pitch').oninput=renderVoiceNumbers;
-    $('save-voice').onclick=()=>action(async()=>{await api('/api/me/voice','PUT',{voice:$('voice').value,rate:Number($('rate').value),pitch:Number($('pitch').value)});notify('声の設定を保存しました')});
+    $('save-voice').onclick=()=>action(async()=>{await api('/api/me/voice','PUT',{voice:$('voice').value,rate:Number($('rate').value),pitch:Number($('pitch').value)});notify('บันทึกการตั้งค่าเสียงแล้วค่ะ')});
     $('reset-voice').onclick=()=>{$('rate').value=0;$('pitch').value=0;renderVoiceNumbers()};
-    $('save-channel').onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/settings`,'PUT',{channel_id:$('channel').value});notify('チャンネルを更新しました')});
+    $('save-channel').onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/settings`,'PUT',{channel_id:$('channel').value});notify('บันทึกช่องแชตแล้วค่ะ')});
     $('queue-play').onclick=()=>action(()=>sendMusic('normal'));
     $('queue-next').onclick=()=>action(()=>sendMusic('next'));
     $('queue-now').onclick=()=>action(()=>sendMusic('now'));
     $('queue-refresh').onclick=()=>action(refreshQueue);
-    document.querySelectorAll('[data-qcommand]').forEach(button=>button.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/command/${button.dataset.qcommand}`,'POST');await refreshQueue();notify('音楽操作を実行しました')}));
-    $('save-repeat').onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/command/repeat_${$('queue-repeat').value}`,'POST');await refreshQueue();notify('リピート設定を更新しました')});
-    $('create-playlist').onclick=()=>action(async()=>{if(!guildId)throw Error('先にBotをサーバーに追加してください');const name=$('playlist-name').value.trim();if(!name)throw Error('名前を入力してください');const result=await api(`/api/guilds/${guildId}/playlists`,'POST',{name});$('playlist-name').value='';await openPlaylist(result.id);notify('プレイリストを作成しました')});
-    $('add-track').onclick=()=>action(async()=>{if(!playlistId)return;const query=$('track-query').value.trim();if(!query)throw Error('曲名またはURLを入力してください');await api(`/api/guilds/${guildId}/playlists/${playlistId}/items`,'POST',{query});$('track-query').value='';await openPlaylist(playlistId)});
-    $('play-list').onclick=()=>action(async()=>{const result=await api(`/api/guilds/${guildId}/playlists/${playlistId}/play`,'POST');notify(result.queued+'曲をキューに追加しました');await refreshQueue()});
-    $('delete-list').onclick=()=>action(async()=>{if(!confirm('このプレイリストを削除しますか？'))return;await api(`/api/guilds/${guildId}/playlists/${playlistId}`,'DELETE');await refreshGuild();notify('プレイリストを削除しました')});
+    document.querySelectorAll('[data-qcommand]').forEach(button=>button.onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/command/${button.dataset.qcommand}`,'POST');await refreshQueue();notify('ดำเนินการกับเพลงแล้วค่ะ')}));
+    $('save-repeat').onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/queue/command/repeat_${$('queue-repeat').value}`,'POST');await refreshQueue();notify('บันทึกการตั้งค่าเล่นซ้ำแล้วค่ะ')});
+    $('create-playlist').onclick=()=>action(async()=>{if(!guildId)throw Error('โปรดเพิ่มลิลินเข้าเซิร์ฟเวอร์ก่อนค่ะ');const name=$('playlist-name').value.trim();if(!name)throw Error('กรุณาตั้งชื่อเพลย์ลิสต์');const result=await api(`/api/guilds/${guildId}/playlists`,'POST',{name});$('playlist-name').value='';await openPlaylist(result.id);notify('สร้างเพลย์ลิสต์แล้วค่ะ')});
+    $('add-track').onclick=()=>action(async()=>{if(!playlistId)return;const query=$('track-query').value.trim();if(!query)throw Error('กรุณาใส่ชื่อเพลงหรือลิงก์');await api(`/api/guilds/${guildId}/playlists/${playlistId}/items`,'POST',{query});$('track-query').value='';await openPlaylist(playlistId)});
+    $('play-list').onclick=()=>action(async()=>{const result=await api(`/api/guilds/${guildId}/playlists/${playlistId}/play`,'POST');notify(`เพิ่มเพลงเข้าคิวแล้ว ${result.queued} เพลง`);await refreshQueue()});
+    $('delete-list').onclick=()=>action(async()=>{if(!confirm('ต้องการลบเพลย์ลิสต์นี้ใช่ไหมคะ?'))return;await api(`/api/guilds/${guildId}/playlists/${playlistId}`,'DELETE');await refreshGuild();notify('ลบเพลย์ลิสต์แล้วค่ะ')});
     $('logout').onclick=()=>action(async()=>{await api('/auth/logout','POST');location.reload()});
     document.querySelectorAll('[data-target]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-target]').forEach(b=>b.classList.toggle('active',b===button));document.getElementById(button.dataset.target).scrollIntoView({behavior:'smooth',block:'start'})});
     bootstrap();

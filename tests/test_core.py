@@ -42,10 +42,10 @@ class DatabaseTests(unittest.TestCase):
 
     def test_user_voice_and_playlist_ownership(self):
         self.assertEqual(db.get_voice_config("123"), {"voice": db.DEFAULT_VOICE, "rate": 0, "pitch": 0})
-        db.set_voice("123", "th-TH-NiwatNeural")
-        self.assertEqual(db.get_voice("123"), "th-TH-NiwatNeural")
-        db.set_voice_config("123", "th-TH-NiwatNeural", 15, -10)
-        self.assertEqual(db.get_voice_config("123"), {"voice": "th-TH-NiwatNeural", "rate": 15, "pitch": -10})
+        db.set_voice("123", db.DEFAULT_VOICE)
+        self.assertEqual(db.get_voice("123"), db.DEFAULT_VOICE)
+        db.set_voice_config("123", db.DEFAULT_VOICE, 15, -10)
+        self.assertEqual(db.get_voice_config("123"), {"voice": db.DEFAULT_VOICE, "rate": 15, "pitch": -10})
         playlist_id = db.create_playlist("123", "456", "お気に入り")
         self.assertTrue(db.add_playlist_item("123", "456", playlist_id, "夜に駆ける"))
         record = db.get_playlist("123", "456", playlist_id)
@@ -61,8 +61,11 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(db.get_read_channel("111"), 222)
 
     def test_non_thai_voices_are_rejected(self):
+        self.assertEqual(list(db.VOICE_CHOICES), [db.DEFAULT_VOICE])
         with self.assertRaises(ValueError):
             db.set_voice("12", "ja-JP-NanamiNeural")
+        with self.assertRaises(ValueError):
+            db.set_voice("12", "th-TH-NiwatNeural")
         with self.assertRaises(ValueError):
             db.set_voice_config("12", db.DEFAULT_VOICE, 50, 0)
 
@@ -74,6 +77,15 @@ class DatabaseTests(unittest.TestCase):
             conn.execute("INSERT INTO preferences VALUES ('999','ja-JP-NanamiNeural')")
         db.initialize()
         self.assertEqual(db.get_voice_config("999"), {"voice": db.DEFAULT_VOICE, "rate": 0, "pitch": 0})
+
+    def test_migrates_previous_male_voice_without_losing_preferences(self):
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO preferences(user_id,voice,rate,pitch) VALUES (?,?,?,?)",
+                ("888", "th-TH-NiwatNeural", -5, 10),
+            )
+        db.initialize()
+        self.assertEqual(db.get_voice_config("888"), {"voice": db.DEFAULT_VOICE, "rate": -5, "pitch": 10})
 
 
 class MusicQueueTests(unittest.IsolatedAsyncioTestCase):
