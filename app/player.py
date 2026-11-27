@@ -563,12 +563,32 @@ class Track:
     requester: str
 
 
+@dataclass
+class PreparedSpeech:
+    path: Path
+    engine: str
+    started_at: float
+    finished_at: float
+
+
+@dataclass
+class SpeechRequest:
+    preparation: asyncio.Task[PreparedSpeech]
+    queued_at: float
+    received_at: float
+    gateway_ms: int | None
+
+
 class GuildPlayer:
     def __init__(self, vc: discord.VoiceClient, loop: asyncio.AbstractEventLoop):
         self.vc = vc
         self.loop = loop
         self.music_queue: MusicQueue[Track] = MusicQueue(max_size=150)
-        self.tts_queue: asyncio.Queue[tuple[str, dict, float, float, int | None]] = asyncio.Queue(maxsize=8)
+        self.tts_queue: asyncio.Queue[SpeechRequest] = asyncio.Queue(maxsize=8)
+        # Download the next voice clip while the previous one is preparing.
+        # Keep network concurrency low on a small Premium server.
+        self._tts_slots = asyncio.Semaphore(2)
+        self._tts_preparations: set[asyncio.Task[PreparedSpeech]] = set()
         self.music_done = asyncio.Event()
         self._music_generation = 0
         self.repeat_mode = "off"
@@ -701,34 +721,73 @@ class GuildPlayer:
         self.mixer.enqueue_speech(DiagnosticTone(), None, priority=True)
         self._resume_audio()
 
+    async def _prepare_speech(self, message: str, settings: dict) -> PreparedSpeech:
+        async with self._tts_slots:
+            started_at = self.loop.time()
+            fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
+            os.close(fd)
+            path = Path(filename)
+            try:
+                # Shield the background network thread long enough to clean its
+                # output if a queued message gets discarded during a request.
+                synthesis = self.loop.create_task(synthesize_thai(message, settings, path))
+                try:
+                    engine = await asyncio.shield(synthesis)
+                except asyncio.CancelledError:
+                    try:
+                        await synthesis
+                    except Exception:
+                        pass
+                    raise
+                return PreparedSpeech(path, engine, started_at, self.loop.time())
+            except BaseException:
+                path.unlink(missing_ok=True)
+                raise
+
+    @staticmethod
+    def _discard_preparation(task: asyncio.Task[PreparedSpeech]):
+        def cleanup(done: asyncio.Task[PreparedSpeech]):
+            if done.cancelled():
+                return
+            try:
+                done.result().path.unlink(missing_ok=True)
+            except Exception:
+                # A failed synthesis already removed its temporary file.
+                pass
+
+        if task.done():
+            cleanup(task)
+        else:
+            task.add_done_callback(cleanup)
+            task.cancel()
+
     async def _tts_worker(self):
         while True:
-            message, settings, queued_at, received_at, gateway_ms = await self.tts_queue.get()
+            request = await self.tts_queue.get()
             path: Path | None = None
             try:
-                if self.loop.time() - queued_at > MAX_TTS_WAIT_SECONDS:
+                if self.loop.time() - request.queued_at > MAX_TTS_WAIT_SECONDS:
                     self.chat_messages_dropped += 1
+                    self._discard_preparation(request.preparation)
                     continue
                 self.last_tts_error = None
-                synthesis_started = self.loop.time()
-                fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
-                os.close(fd)
-                path = Path(filename)
-                self.last_tts_engine = await synthesize_thai(message, settings, path)
-                synthesis_finished = self.loop.time()
-                if self.loop.time() - queued_at > MAX_TTS_WAIT_SECONDS:
+                prepared = await request.preparation
+                path = prepared.path
+                self.last_tts_engine = prepared.engine
+                if self.loop.time() - request.queued_at > MAX_TTS_WAIT_SECONDS:
                     self.chat_messages_dropped += 1
                     continue
                 source = discord.FFmpegPCMAudio(str(path), options="-vn")
-                def record_first_frame(sent_at: float, *, queued=queued_at, received=received_at,
-                                       started=synthesis_started, generated=synthesis_finished,
-                                       gateway=gateway_ms):
+                def record_first_frame(sent_at: float, *, queued=request.queued_at, received=request.received_at,
+                                       started=prepared.started_at, generated=prepared.finished_at,
+                                       gateway=request.gateway_ms):
                     self._record_tts_latency(received, queued, started, generated, sent_at, gateway)
 
                 self.mixer.enqueue_speech(source, path, on_start=record_first_frame)
                 self._resume_audio()
                 path = None  # Mixer now owns this file
             except asyncio.CancelledError:
+                self._discard_preparation(request.preparation)
                 raise
             except Exception as error:
                 status = getattr(error, "status", None)
@@ -763,11 +822,15 @@ class GuildPlayer:
                          gateway_ms: int | None = None) -> bool:
         if self.tts_queue.full():
             # Prefer recent chat over speaking messages from minutes ago.
-            self.tts_queue.get_nowait()
+            discarded = self.tts_queue.get_nowait()
+            self._discard_preparation(discarded.preparation)
             self.tts_queue.task_done()
             self.chat_messages_dropped += 1
         queued_at = self.loop.time()
-        self.tts_queue.put_nowait((message, settings, queued_at, received_at or queued_at, gateway_ms))
+        task = self.loop.create_task(self._prepare_speech(message, settings))
+        self._tts_preparations.add(task)
+        task.add_done_callback(self._tts_preparations.discard)
+        self.tts_queue.put_nowait(SpeechRequest(task, queued_at, received_at or queued_at, gateway_ms))
         return True
 
     def skip(self):
@@ -782,6 +845,16 @@ class GuildPlayer:
         self.music_task.cancel()
         self.tts_task.cancel()
         await asyncio.gather(self.music_task, self.tts_task, return_exceptions=True)
+        while not self.tts_queue.empty():
+            pending = self.tts_queue.get_nowait()
+            self._discard_preparation(pending.preparation)
+            self.tts_queue.task_done()
+        preparations = tuple(self._tts_preparations)
+        for task in preparations:
+            if not task.done():
+                task.cancel()
+        if preparations:
+            await asyncio.gather(*preparations, return_exceptions=True)
         self.vc.stop()
         self.mixer.cleanup()
         if self.vc.is_connected():

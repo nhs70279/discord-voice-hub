@@ -159,9 +159,10 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.player.add_speech(str(number), {}))
         self.assertEqual(self.player.tts_queue.qsize(), 8)
         self.assertEqual(self.player.chat_messages_dropped, 2)
-        queued = [self.player.tts_queue.get_nowait()[0] for _ in range(8)]
-        self.assertEqual(queued, [str(number) for number in range(2, 10)])
-        for _ in queued:
+        queued = [self.player.tts_queue.get_nowait() for _ in range(8)]
+        self.assertEqual(len(queued), 8)
+        for request in queued:
+            self.player._discard_preparation(request.preparation)
             self.player.tts_queue.task_done()
 
     async def test_tts_worker_skips_old_messages_before_synthesizing(self):
@@ -169,10 +170,82 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(self.module, "synthesize_thai", new=AsyncMock()) as synthesize:
             old = self.player.loop.time() - 40
-            self.player.tts_queue.put_nowait(("old message", {}, old, old, None))
+            unused = self.player.loop.create_future()
+            self.player.tts_queue.put_nowait(self.module.SpeechRequest(unused, old, old, None))
             await asyncio.wait_for(self.player.tts_queue.join(), timeout=1)
             synthesize.assert_not_awaited()
         self.assertEqual(self.player.chat_messages_dropped, 1)
+
+    async def test_two_tts_requests_prepare_concurrently_but_play_in_order(self):
+        first_started = asyncio.Event()
+        second_started = asyncio.Event()
+        finish_first = asyncio.Event()
+
+        async def fake_synthesis(message, _settings, path):
+            if message == "first":
+                first_started.set()
+                await finish_first.wait()
+            else:
+                second_started.set()
+            path.write_bytes(message.encode() * 100)
+            return "Google Thai"
+
+        with patch.object(self.module, "synthesize_thai", side_effect=fake_synthesis), \
+             patch.object(self.module.discord, "FFmpegPCMAudio", side_effect=lambda path, **_: FakeAudioSource([Path(path).read_bytes()[:FRAME_BYTES]])):
+            await self.player.add_speech("first", {})
+            await self.player.add_speech("second", {})
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            await asyncio.wait_for(second_started.wait(), timeout=1)
+            self.assertFalse(finish_first.is_set())
+            finish_first.set()
+            await asyncio.wait_for(self.player.tts_queue.join(), timeout=1)
+
+        self.assertEqual(len(self.player.mixer.speech), 2)
+        queued_sources = [entry[0] for entry in self.player.mixer.speech]
+        self.assertEqual(next(queued_sources[0].frames)[:5], b"first")
+        self.assertEqual(next(queued_sources[1].frames)[:6], b"second")
+
+    async def test_dropping_prefetched_speech_removes_temp_file(self):
+        async def fake_synthesis(_message, _settings, path):
+            path.write_bytes(b"F" * 300)
+            return "Google Thai"
+
+        with patch.object(self.module, "synthesize_thai", side_effect=fake_synthesis):
+            self.player.tts_task.cancel()
+            await asyncio.gather(self.player.tts_task, return_exceptions=True)
+            await self.player.add_speech("discard me", {})
+            request = self.player.tts_queue.get_nowait()
+            prepared = await asyncio.wait_for(request.preparation, timeout=1)
+            self.assertTrue(prepared.path.exists())
+            self.player._discard_preparation(request.preparation)
+            self.assertFalse(prepared.path.exists())
+            self.player.tts_queue.task_done()
+
+    async def test_cancelling_inflight_download_cleans_file_after_network_finishes(self):
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        created_path = []
+
+        async def fake_synthesis(_message, _settings, path):
+            created_path.append(path)
+            started.set()
+            await finish.wait()
+            path.write_bytes(b"F" * 300)
+            return "Google Thai"
+
+        with patch.object(self.module, "synthesize_thai", side_effect=fake_synthesis):
+            self.player.tts_task.cancel()
+            await asyncio.gather(self.player.tts_task, return_exceptions=True)
+            await self.player.add_speech("discard after download", {})
+            request = self.player.tts_queue.get_nowait()
+            await asyncio.wait_for(started.wait(), timeout=1)
+            self.player._discard_preparation(request.preparation)
+            finish.set()
+            await asyncio.gather(request.preparation, return_exceptions=True)
+            self.player.tts_queue.task_done()
+
+        self.assertTrue(request.preparation.cancelled())
+        self.assertFalse(created_path[0].exists())
 
     async def test_youtube_stream_without_frames_recovers_with_local_audio(self):
         local_source = FakeAudioSource([bytes([7]) * FRAME_BYTES])
