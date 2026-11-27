@@ -31,13 +31,18 @@ class VoiceHubBot(commands.Bot):
         log.info("Logged into Discord as %s", self.user)
 
     async def on_message(self, message: discord.Message):
-        if not message.guild or message.author.bot or not message.content:
+        if not message.guild or message.author.bot:
             return
         player = self.guild_players.get(message.guild.id)
         if not player or not player.vc.is_connected():
             return
+        player.chat_events_seen += 1
+        if not message.content:
+            player.chat_events_without_content += 1
+            return
         if db.get_read_channel(message.guild.id) != message.channel.id:
             return
+        player.chat_events_in_read_channel += 1
         # Per-author, per-guild cooldown: spam should not flood TTS.
         key = (message.guild.id, message.author.id)
         now = asyncio.get_running_loop().time()
@@ -46,7 +51,8 @@ class VoiceHubBot(commands.Bot):
         self.last_message[key] = now
         spoken = speech_text(message.author.display_name[:32], message.content)
         if spoken:
-            await player.add_speech(spoken, db.get_voice_config(message.author.id))
+            if await player.add_speech(spoken, db.get_voice_config(message.author.id)):
+                player.chat_messages_enqueued += 1
 
     async def ensure_player(self, interaction: discord.Interaction) -> GuildPlayer:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -142,6 +148,25 @@ class VoiceCommands(commands.Cog):
             log.warning("Voice test failed: %s", error)
             await interaction.followup.send(f"ทดสอบเสียงไม่สำเร็จ: {error}", ephemeral=True)
 
+    @app_commands.command(name="testtts", description="ทดสอบเสียงพูดภาษาไทยของลิลินโดยไม่ใช้ YouTube")
+    async def test_tts(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            player = await self.bot.ensure_player(interaction)
+            queued = await player.add_speech(
+                "สวัสดีค่ะ ฉันชื่อลิลิน ตอนนี้กำลังทดสอบเสียงอ่านภาษาไทยค่ะ",
+                db.get_voice_config(interaction.user.id),
+            )
+            if not queued:
+                raise ValueError("คิวเสียงอ่านเต็ม กรุณารอสักครู่ค่ะ")
+            await interaction.followup.send(
+                "🎙️ กำลังสร้างเสียงอ่านภาษาไทยค่ะ หากไม่ได้ยิน กรุณารอประมาณ 30 วินาทีแล้วใช้ /diagnose เพื่อตรวจสอบข้อผิดพลาด",
+                ephemeral=True,
+            )
+        except Exception as error:
+            log.warning("TTS test failed: %s", error)
+            await interaction.followup.send(f"ทดสอบเสียงอ่านไม่สำเร็จ: {error}", ephemeral=True)
+
     @app_commands.command(name="diagnose", description="ตรวจสอบการเชื่อมต่อเสียงและสถานะเพลงของลิลิน")
     async def diagnose(self, interaction: discord.Interaction):
         player = self.bot.guild_players.get(interaction.guild_id)
@@ -151,12 +176,22 @@ class VoiceCommands(commands.Cog):
             dave_version = importlib.metadata.version("davey")
         except importlib.metadata.PackageNotFoundError:
             dave_version = "ไม่พบ"
+        try:
+            edge_version = importlib.metadata.version("edge-tts")
+        except importlib.metadata.PackageNotFoundError:
+            edge_version = "ไม่พบ"
+        read_channel = db.get_read_channel(interaction.guild_id)
         voice_state = getattr(player.vc, "_connection", None)
         dave_session = getattr(voice_state, "dave_session", None)
         dave_ready = bool(dave_session and getattr(dave_session, "ready", False))
         dave_protocol = getattr(voice_state, "dave_protocol_version", 0)
         lines = [
             f"🔎 discord.py: {discord.__version__} / davey: {dave_version}",
+            f"🎙️ edge-tts: {edge_version}",
+            f"📝 ช่องแชตที่อ่าน: {f'<#{read_channel}>' if read_channel else 'ยังไม่ได้ตั้งค่า กรุณาใช้ /join'}",
+            f"📨 แชตที่ได้รับ: {player.chat_events_seen} / ช่องที่อ่าน: {player.chat_events_in_read_channel} / เข้าคิวเสียง: {player.chat_messages_enqueued}",
+            f"⚠️ แชตไม่มีเนื้อหา: {player.chat_events_without_content}",
+            f"🎙️ คิวเสียงอ่าน: {player.tts_queue.qsize()} / ตัวสร้างเสียงทำงาน: {'ใช่' if not player.tts_task.done() else 'ไม่'}",
             f"🔐 DAVE เข้ารหัสพร้อม: {'ใช่' if dave_ready else 'ไม่'} (protocol {dave_protocol})",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
             f"📡 ส่งเสียง: {'ใช่' if player.vc.is_playing() else 'ไม่'}",
