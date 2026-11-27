@@ -1,10 +1,12 @@
 # リリン（ลิลิน）— タイ語読み上げ＆音楽Bot
 
-**キャラクター：リリン**。長い黒髪・紫の瞳・近未来の女王をモチーフにしたボットです。WebダッシュボードとDiscordコマンドの表示文はタイ語で統一。アバター画像は [`app/static/lilin-avatar.png`](app/static/lilin-avatar.png) にあり、Discord Developer PortalのBotアイコンとして設定できます。
+**キャラクター：リリン**。長い黒髪・紫の瞳・近未来の女王をモチーフにしたボットです。WebダッシュボードとDiscordコマンドの表示文はタイ語で統一。アバター画像は [`app/static/lilin-avatar.jpg`](app/static/lilin-avatar.jpg) にあり、Discord Developer PortalのBotアイコンとして設定できます。
 
 読み上げはリリン固有のタイ語女性ニューラル音声（`th-TH-PremwadeeNeural`）に統一しました。ユーザーごとの話速・音程設定は残し、初期値は声を不自然に変えない `0%` / `0 Hz` です。既存の男性声・他言語音声設定はDB起動時にリリンの声へ移行します（個人の話速、音程、プレイリストは保持）。「最も自然な声」の絶対評価はできず、実際の音質はEdge TTSサービスと文章に依存します。
 
-> **Fly.io無料枠向けの新しい構成：** [Fly.ioデプロイ手順（日本語）](docs/FLY_IO_JA.md)。`Dockerfile`・`fly.toml`・`.env.fly.example`・SQLiteバックアップ機能を追加しました。Oracle Cloud版の手順も引き続き使えます。
+> **Northflankへの移行：** [Northflank導入・Fly.ioからのSQLite移行手順（日本語）](docs/NORTHFLANK_JA.md)。現在のDockerfileを再利用して、単一の常時稼働サービスでDiscord Botとタイ語Webダッシュボードを動かします。サービス作成時は無料プランでもカードによる本人確認が要求される場合があります。
+
+> **旧Fly.io構成：** [Fly.ioデプロイ手順（日本語）](docs/FLY_IO_JA.md)。SQLiteバックアップとFly Volumeを引き継ぐまでは旧アプリを削除しないでください。
 
 > **Oracle Cloud Always Free + Cloudflare Tunnelで24時間稼働したい場合：** [タイ語のセットアップ手順](docs/ORACLE_CLOUDFLARE_TH.md) を参照してください。`deploy/oracle-install.sh` はUbuntu 24.04 ARM64用のインストーラー、`deploy/voicehub.service` は自動起動用のsystemdユニット、`.env.oracle.example` は本番用設定テンプレートです。Discord・Oracle・Cloudflareのアカウントでの実運用テストは未実施です。
 
@@ -79,7 +81,7 @@ app/
   audio_mix.py    48kHz PCM音声の混合
   db.py           SQLite / ユーザー設定 / プレイリスト保存
   static/index.html   タイ語ダッシュボードUI
-  static/lilin-avatar.png   リリンのキャラクターアイコン
+  static/lilin-avatar.jpg   リリンのキャラクターアイコン
 tests/test_core.py      音声混合・保存ロジック検証
 ```
 
