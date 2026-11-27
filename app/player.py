@@ -12,6 +12,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 import discord
@@ -436,7 +437,7 @@ class Mixer(discord.AudioSource):
         self.music_frames = 0
         self.music_frames_sent = 0
         self.speech_frames_sent = 0
-        self.speech: deque[tuple[discord.AudioSource, Path | None]] = deque()
+        self.speech: deque[tuple[discord.AudioSource, Path | None, Callable[[float], None] | None]] = deque()
         self.music_volume = 0.75
         self.tts_volume = 1.0
         self.duck_fraction = 0.28
@@ -467,17 +468,21 @@ class Mixer(discord.AudioSource):
             self.music.cleanup()
             self.music = None
 
-    def enqueue_speech(self, source: discord.AudioSource, path: Path | None, *, priority: bool = False):
+    def enqueue_speech(
+        self, source: discord.AudioSource, path: Path | None, *, priority: bool = False,
+        on_start: Callable[[float], None] | None = None,
+    ):
         with self._lock:
             if self.closed:
                 source.cleanup()
                 if path:
                     path.unlink(missing_ok=True)
             else:
+                entry = (source, path, on_start)
                 if priority:
-                    self.speech.appendleft((source, path))
+                    self.speech.appendleft(entry)
                 else:
-                    self.speech.append((source, path))
+                    self.speech.append(entry)
                 self._idle_notified = False
 
     def has_active_audio(self) -> bool:
@@ -512,7 +517,7 @@ class Mixer(discord.AudioSource):
                     self._stop_music_locked()
                     self.loop.call_soon_threadsafe(self.on_music_end)
             while self.speech:
-                source, path = self.speech[0]
+                source, path, on_start = self.speech[0]
                 try:
                     frame = source.read()
                 except Exception:
@@ -521,6 +526,10 @@ class Mixer(discord.AudioSource):
                 if frame:
                     speech = normalize(frame)
                     self.speech_frames_sent += 1
+                    if on_start:
+                        # Capture the first real PCM frame, not merely TTS generation.
+                        self.speech[0] = (source, path, None)
+                        self.loop.call_soon_threadsafe(on_start, time.monotonic())
                     break
                 source.cleanup()
                 if path:
@@ -541,7 +550,7 @@ class Mixer(discord.AudioSource):
             self.closed = True
             self._stop_music_locked()
             while self.speech:
-                source, path = self.speech.popleft()
+                source, path, _ = self.speech.popleft()
                 source.cleanup()
                 if path:
                     path.unlink(missing_ok=True)
@@ -559,7 +568,7 @@ class GuildPlayer:
         self.vc = vc
         self.loop = loop
         self.music_queue: MusicQueue[Track] = MusicQueue(max_size=150)
-        self.tts_queue: asyncio.Queue[tuple[str, dict, float]] = asyncio.Queue(maxsize=8)
+        self.tts_queue: asyncio.Queue[tuple[str, dict, float, float, int | None]] = asyncio.Queue(maxsize=8)
         self.music_done = asyncio.Event()
         self._music_generation = 0
         self.repeat_mode = "off"
@@ -569,6 +578,8 @@ class GuildPlayer:
         self.last_music_fallback: str | None = None
         self.last_tts_error: str | None = None
         self.last_tts_engine: str | None = None
+        self.last_tts_latency_ms: dict[str, int | None] | None = None
+        self.tts_latency_samples: deque[int] = deque(maxlen=20)
         self.last_transport_error: str | None = None
         self.chat_events_seen = 0
         self.chat_events_without_content = 0
@@ -692,22 +703,29 @@ class GuildPlayer:
 
     async def _tts_worker(self):
         while True:
-            message, settings, queued_at = await self.tts_queue.get()
+            message, settings, queued_at, received_at, gateway_ms = await self.tts_queue.get()
             path: Path | None = None
             try:
                 if self.loop.time() - queued_at > MAX_TTS_WAIT_SECONDS:
                     self.chat_messages_dropped += 1
                     continue
                 self.last_tts_error = None
+                synthesis_started = self.loop.time()
                 fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
                 os.close(fd)
                 path = Path(filename)
                 self.last_tts_engine = await synthesize_thai(message, settings, path)
+                synthesis_finished = self.loop.time()
                 if self.loop.time() - queued_at > MAX_TTS_WAIT_SECONDS:
                     self.chat_messages_dropped += 1
                     continue
                 source = discord.FFmpegPCMAudio(str(path), options="-vn")
-                self.mixer.enqueue_speech(source, path)
+                def record_first_frame(sent_at: float, *, queued=queued_at, received=received_at,
+                                       started=synthesis_started, generated=synthesis_finished,
+                                       gateway=gateway_ms):
+                    self._record_tts_latency(received, queued, started, generated, sent_at, gateway)
+
+                self.mixer.enqueue_speech(source, path, on_start=record_first_frame)
                 self._resume_audio()
                 path = None  # Mixer now owns this file
             except asyncio.CancelledError:
@@ -726,13 +744,30 @@ class GuildPlayer:
                     path.unlink(missing_ok=True)
                 self.tts_queue.task_done()
 
-    async def add_speech(self, message: str, settings: dict) -> bool:
+    def _record_tts_latency(self, received_at: float, queued_at: float, started_at: float,
+                            generated_at: float, sent_at: float, gateway_ms: int | None):
+        metrics = {
+            "discord": gateway_ms,
+            "queue": round((started_at - queued_at) * 1000),
+            "synthesis": round((generated_at - started_at) * 1000),
+            "playback_wait": round((sent_at - generated_at) * 1000),
+            "total": round((sent_at - received_at) * 1000) + (gateway_ms or 0),
+        }
+        self.last_tts_latency_ms = metrics
+        self.tts_latency_samples.append(metrics["total"])
+        log.info("TTS latency guild=%s gateway=%s queue=%d synthesis=%d playback_wait=%d total=%d ms",
+                 self.vc.guild.id, metrics["discord"], metrics["queue"], metrics["synthesis"],
+                 metrics["playback_wait"], metrics["total"])
+
+    async def add_speech(self, message: str, settings: dict, *, received_at: float | None = None,
+                         gateway_ms: int | None = None) -> bool:
         if self.tts_queue.full():
             # Prefer recent chat over speaking messages from minutes ago.
             self.tts_queue.get_nowait()
             self.tts_queue.task_done()
             self.chat_messages_dropped += 1
-        self.tts_queue.put_nowait((message, settings, self.loop.time()))
+        queued_at = self.loop.time()
+        self.tts_queue.put_nowait((message, settings, queued_at, received_at or queued_at, gateway_ms))
         return True
 
     def skip(self):
