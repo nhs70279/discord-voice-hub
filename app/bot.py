@@ -5,6 +5,7 @@ import importlib.metadata
 import logging
 import os
 import shutil
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
@@ -240,7 +241,7 @@ class VoiceCommands(commands.Cog):
             if not queued:
                 raise ValueError("คิวเสียงอ่านเต็ม กรุณารอสักครู่ค่ะ")
             await interaction.followup.send(
-                "🎙️ กำลังสร้างเสียงอ่านภาษาไทยค่ะ หากไม่ได้ยิน กรุณารอประมาณ 30 วินาทีแล้วใช้ /diagnose เพื่อตรวจสอบข้อผิดพลาด",
+                "🎙️ กำลังสร้างเสียงอ่านภาษาไทยค่ะ หากไม่ได้ยิน กรุณารอประมาณ 10–20 วินาทีแล้วใช้ /diagnose ค่ะ",
                 ephemeral=True,
             )
         except Exception as error:
@@ -283,6 +284,7 @@ class VoiceCommands(commands.Cog):
             f"⚠️ แชตไม่มีเนื้อหา: {player.chat_events_without_content}",
             f"🔒 แชตส่วนตัวที่ไม่อ่านเพื่อความปลอดภัย: {player.chat_messages_private_skipped}",
             f"🎙️ คิวเสียงอ่าน: {player.tts_queue.qsize()} / ตัวสร้างเสียงทำงาน: {'ใช่' if not player.tts_task.done() else 'ไม่'}",
+            f"⏭️ ข้อความเสียงที่ข้ามเพราะคิวล้นหรือรอนาน: {player.chat_messages_dropped}",
             f"🎙️ เครื่องสร้างเสียงล่าสุด: {player.last_tts_engine or 'ยังไม่ได้สร้างเสียง'}",
             f"🔐 DAVE เข้ารหัสพร้อม: {'ใช่' if dave_ready else 'ไม่'} (protocol {dave_protocol})",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
@@ -300,7 +302,16 @@ class VoiceCommands(commands.Cog):
 
     @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อ ลิงก์ YouTube หรือ SoundCloud หรือเพลย์ลิสต์")
     async def play(self, interaction: discord.Interaction, query: str):
-        await interaction.response.defer(ephemeral=True)
+        # A slash interaction must be acknowledged within three seconds. If the
+        # host/Discord network already missed that window, no followup is valid.
+        age = (datetime.now(timezone.utc) - interaction.created_at).total_seconds()
+        if age > 1.5:
+            log.warning("/play arrived %.2fs after Discord created the interaction", age)
+        try:
+            await interaction.response.defer(thinking=True, ephemeral=True)
+        except discord.NotFound:
+            log.warning("/play interaction expired before acknowledgement (age %.2fs)", age)
+            return
         try:
             await self.bot.ensure_player(interaction)
             count = await self.bot.enqueue_query(interaction.guild_id, query, str(interaction.user.id))

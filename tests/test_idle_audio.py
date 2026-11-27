@@ -132,6 +132,28 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         self.assertTrue(self.voice.is_playing())
 
+    async def test_tts_queue_drops_oldest_messages_to_keep_chat_current(self):
+        # Don't let the worker consume messages during this queue-capacity test.
+        self.player.tts_task.cancel()
+        await asyncio.gather(self.player.tts_task, return_exceptions=True)
+        for number in range(10):
+            self.assertTrue(await self.player.add_speech(str(number), {}))
+        self.assertEqual(self.player.tts_queue.qsize(), 8)
+        self.assertEqual(self.player.chat_messages_dropped, 2)
+        queued = [self.player.tts_queue.get_nowait()[0] for _ in range(8)]
+        self.assertEqual(queued, [str(number) for number in range(2, 10)])
+        for _ in queued:
+            self.player.tts_queue.task_done()
+
+    async def test_tts_worker_skips_old_messages_before_synthesizing(self):
+        from unittest.mock import AsyncMock
+
+        with patch.object(self.module, "synthesize_thai", new=AsyncMock()) as synthesize:
+            self.player.tts_queue.put_nowait(("old message", {}, self.player.loop.time() - 40))
+            await asyncio.wait_for(self.player.tts_queue.join(), timeout=1)
+            synthesize.assert_not_awaited()
+        self.assertEqual(self.player.chat_messages_dropped, 1)
+
     async def test_youtube_stream_without_frames_recovers_with_local_audio(self):
         local_source = FakeAudioSource([bytes([7]) * FRAME_BYTES])
         with patch.object(self.module, "music_audio_source", return_value=(FakeAudioSource([]), None)), \
