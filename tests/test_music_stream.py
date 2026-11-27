@@ -24,7 +24,7 @@ class MusicStreamTests(unittest.TestCase):
         old_until = player_module._youtube_challenge_until
         player_module._youtube_challenge_until = 0.0
         self.addCleanup(setattr, player_module, "_youtube_challenge_until", old_until)
-        env_patch = patch.dict(os.environ, {"YOUTUBE_PROXY_URL": ""})
+        env_patch = patch.dict(os.environ, {"YOUTUBE_PROXY_URL": "", "YOUTUBE_POT_READY": ""})
         env_patch.start()
         self.addCleanup(env_patch.stop)
 
@@ -111,6 +111,23 @@ class MusicStreamTests(unittest.TestCase):
         options = youtube_dl.call_args.args[0]
         self.assertEqual(options["extractor_args"]["youtube"]["player_client"], ["web_safari"])
         self.assertEqual(options["format"], "bestaudio[protocol*=m3u8]/bestaudio/best")
+
+    @patch("app.player.discord.FFmpegPCMAudio")
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_prefers_mweb_only_when_local_pot_provider_is_ready(self, youtube_dl, ffmpeg):
+        youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {
+            "url": "https://example.invalid/audio", "http_headers": {}
+        }
+        with patch.dict(os.environ, {"YOUTUBE_POT_READY": "1"}):
+            music_audio_source("https://www.youtube.com/watch?v=abc")
+            options = youtube_dl.call_args.args[0]
+            self.assertEqual(options["extractor_args"]["youtube"]["player_client"], ["mweb"])
+
+        music_audio_source("https://www.youtube.com/watch?v=abc")
+        self.assertEqual(
+            youtube_dl.call_args.args[0]["extractor_args"]["youtube"]["player_client"],
+            ["web_safari"],
+        )
 
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
