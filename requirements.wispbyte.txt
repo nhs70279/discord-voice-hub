@@ -1,0 +1,6 @@
+# Select this file in the Wispbyte Python egg's REQUIREMENTS_FILE field.
+-r requirements.txt
+
+# Bundles a usable FFmpeg executable when the shared Python image lacks apt FFmpeg.
+# Wispbyte's free egg does not grant root for apt-get.
+imageio-ffmpeg>=0.6,<1
