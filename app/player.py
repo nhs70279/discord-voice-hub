@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import shlex
 import tempfile
 import threading
 from collections import deque
@@ -69,9 +70,23 @@ def music_audio_source(url: str) -> discord.AudioSource:
         info = downloader.extract_info(url, download=False)
     if not info or not info.get("url"):
         raise RuntimeError("Audio stream not found")
+    # YouTube may require the same HTTP headers that yt-dlp used to resolve the
+    # media URL. Without them FFmpeg can exit immediately with a 403, while the
+    # bot remains in the voice channel and appears to be playing silence.
+    headers = info.get("http_headers") or {}
+    allowed = {"user-agent", "referer", "origin", "accept", "accept-language"}
+    header_lines = "".join(
+        f"{key}: {value}\r\n"
+        for key, value in headers.items()
+        if key.lower() in allowed and isinstance(value, str)
+        and "\r" not in value and "\n" not in value
+    )
+    before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    if header_lines:
+        before_options += " -headers " + shlex.quote(header_lines)
     return discord.FFmpegPCMAudio(
         info["url"],
-        before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+        before_options=before_options,
         options="-vn",
     )
 
@@ -79,11 +94,13 @@ def music_audio_source(url: str) -> discord.AudioSource:
 class Mixer(discord.AudioSource):
     """Persistent PCM source; ducks music only while speech is audible."""
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, on_music_end):
+    def __init__(self, loop: asyncio.AbstractEventLoop, on_music_end, on_music_error=None):
         self.loop = loop
         self.on_music_end = on_music_end
+        self.on_music_error = on_music_error
         self._lock = threading.RLock()
         self.music: discord.AudioSource | None = None
+        self.music_frames = 0
         self.speech: deque[tuple[discord.AudioSource, Path]] = deque()
         self.music_volume = 0.75
         self.tts_volume = 1.0
@@ -101,6 +118,7 @@ class Mixer(discord.AudioSource):
                 return
             self._stop_music_locked()
             self.music = source
+            self.music_frames = 0
             self.paused = False
 
     def skip(self):
@@ -135,7 +153,10 @@ class Mixer(discord.AudioSource):
                     frame = b""
                 if frame:
                     music = normalize(frame)
+                    self.music_frames += 1
                 else:
+                    if self.music_frames == 0 and self.on_music_error:
+                        self.loop.call_soon_threadsafe(self.on_music_error)
                     self._stop_music_locked()
                     self.loop.call_soon_threadsafe(self.on_music_end)
             while self.speech:
@@ -184,7 +205,9 @@ class GuildPlayer:
         self._music_generation = 0
         self.repeat_mode = "off"
         self.current: Track | None = None
-        self.mixer = Mixer(loop, self.music_done.set)
+        self.playback_status = "idle"
+        self.last_music_error: str | None = None
+        self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure)
         self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
         self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
         self.vc.play(self.mixer)
@@ -198,6 +221,8 @@ class GuildPlayer:
         while True:
             track = await self.music_queue.get()
             self.current = track
+            self.playback_status = "loading"
+            self.last_music_error = None
             generation = self._music_generation
             try:
                 source = await asyncio.to_thread(music_audio_source, track.url)
@@ -206,6 +231,7 @@ class GuildPlayer:
                     continue
                 self.music_done.clear()
                 self.mixer.set_music(source)
+                self.playback_status = "playing"
                 await self.music_done.wait()
                 if generation == self._music_generation and self.repeat_mode in {"one", "all"}:
                     self.music_queue.add_many([track], front=self.repeat_mode == "one")
@@ -213,8 +239,17 @@ class GuildPlayer:
                 raise
             except Exception:
                 log.exception("Could not play track: %s", track.title)
+                self.last_music_error = "ไม่สามารถโหลดเสียงจาก YouTube ได้ กรุณาลองเพลงอื่นหรือตรวจสอบบันทึกระบบ"
+                self.playback_status = "error"
             finally:
                 self.current = None
+                if self.playback_status != "error":
+                    self.playback_status = "idle"
+
+    def _report_stream_failure(self):
+        log.error("FFmpeg exited without producing any audio for %s", self.current.title if self.current else "unknown track")
+        self.last_music_error = "เปิดสตรีมเสียงไม่สำเร็จ กรุณาลองเพลงอื่นหรือตรวจสอบบันทึกระบบ"
+        self.playback_status = "error"
 
     async def _tts_worker(self):
         while True:

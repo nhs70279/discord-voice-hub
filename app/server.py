@@ -256,13 +256,15 @@ def web_voice_player(request: Request, guild_id: str, user_id: str):
 async def get_queue(request: Request, guild_id: str, guild=Depends(require_guild)):
     player = request.app.state.bot.guild_players.get(int(guild_id))
     if not player or not player.vc.is_connected():
-        return {"connected": False, "now_playing": None, "upcoming": [], "paused": False, "repeat": "off"}
+        return {"connected": False, "now_playing": None, "upcoming": [], "paused": False, "repeat": "off", "playback_status": "idle", "music_error": None}
     return {
         "connected": True,
         "now_playing": {"title": player.current.title, "requester": player.current.requester} if player.current else None,
         "upcoming": [{"number": index, "title": track.title, "requester": track.requester} for index, track in enumerate(player.music_queue.snapshot(), 1)],
         "paused": player.mixer.paused,
         "repeat": player.repeat_mode,
+        "playback_status": player.playback_status,
+        "music_error": player.last_music_error,
     }
 
 

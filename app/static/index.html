@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0d1021">
   <meta name="description" content="ลิลิน ผู้ช่วยเสียงภาษาไทยและผู้ดูแลเพลงบน Discord ของคุณ">
-  <link rel="icon" type="image/jpeg" href="/static/lilin-avatar.jpg">
+  <link rel="icon" type="image/png" href="/static/lilin-avatar.png">
   <title>ลิลิน | ผู้ช่วยเสียงและเพลงบน Discord</title>
   <style>
     :root { font-family: "Noto Sans Thai",Tahoma,Inter,system-ui,sans-serif; color:#f2f3ff; background:#0d1021; font-synthesis:none; }
@@ -52,7 +52,7 @@
 <body>
   <div class="login-wrap hidden" id="login">
     <div class="login-card">
-      <div class="brand"><img class="brand-icon" src="/static/lilin-avatar.jpg" alt="ลิลิน"> ลิลิน</div>
+      <div class="brand"><img class="brand-icon" src="/static/lilin-avatar.png" alt="ลิลิน"> ลิลิน</div>
       <p class="eyebrow" style="margin-top:30px">ผู้ช่วยเสียงประจำเซิร์ฟเวอร์ของคุณ</p>
       <h1>สวัสดีค่ะ ฉันชื่อลิลิน 💜</h1>
       <p>ฉันจะอ่านแชตภาษาไทยด้วยเสียงนุ่มนวล และช่วยดูแลเพลง คิวเพลง และเพลย์ลิสต์บน Discord ให้คุณค่ะ</p>
@@ -62,7 +62,7 @@
   </div>
   <div class="app hidden" id="app">
     <aside class="sidebar">
-      <div class="brand"><img class="brand-icon" src="/static/lilin-avatar.jpg" alt="ลิลิน"> ลิลิน</div>
+      <div class="brand"><img class="brand-icon" src="/static/lilin-avatar.png" alt="ลิลิน"> ลิลิน</div>
       <div><p class="small-title">เซิร์ฟเวอร์</p><label class="label" for="guild">เลือกเซิร์ฟเวอร์</label><select id="guild"></select></div>
       <nav aria-label="เมนูหลัก">
         <button class="nav-item active" data-target="read-panel">◉　ตั้งค่าเสียงอ่าน</button>
@@ -74,7 +74,7 @@
     </aside>
     <main>
       <div class="topline"><div><p class="eyebrow">พื้นที่ส่วนตัวของคุณกับลิลิน</p><h1>แผงควบคุม</h1><p class="muted">ตั้งค่าเสียงอ่าน จัดคิวเพลง และสร้างเพลย์ลิสต์ได้ในที่เดียว</p></div><span class="pill">ผู้ช่วยเสียงและเพลง</span></div>
-      <section class="hero"><div><p class="eyebrow">เริ่มต้นกับลิลิน</p><h2>พิมพ์ <code>/join</code> ใน Discord ได้เลยค่ะ</h2><p>เมื่อฉันเข้าห้องเสียงแล้ว จะเริ่มอ่านข้อความจากช่องแชตที่เลือกให้อัตโนมัติ 💜</p></div><img class="hero-avatar" src="/static/lilin-avatar.jpg" alt="ลิลิน ราชินีแห่งโลกอนาคต"></section>
+      <section class="hero"><div><p class="eyebrow">เริ่มต้นกับลิลิน</p><h2>พิมพ์ <code>/join</code> ใน Discord ได้เลยค่ะ</h2><p>เมื่อฉันเข้าห้องเสียงแล้ว จะเริ่มอ่านข้อความจากช่องแชตที่เลือกให้อัตโนมัติ 💜</p></div><img class="hero-avatar" src="/static/lilin-avatar.png" alt="ลิลิน ราชินีแห่งโลกอนาคต"></section>
       <div class="grid">
         <section class="panel" id="read-panel"><div class="head"><h2>🔊 เสียงอ่านของลิลิน</h2><span class="pill">ภาษาไทย</span></div><p class="sub">ลิลินใช้เสียงผู้หญิงภาษาไทยแบบ Neural เพื่อให้น้ำเสียงเป็นธรรมชาติ คุณสามารถปรับความเร็วและระดับเสียงของข้อความตัวเองได้</p><label class="label" for="voice">เสียงประจำตัวของลิลิน</label><select id="voice" disabled></select><div class="voice-range"><div class="voice-range-label"><label class="label" for="rate">ความเร็วในการพูด</label><strong class="voice-range-value" id="rate-value">ปกติ</strong></div><input type="range" class="voice-slider" id="rate" min="-40" max="40" step="5" value="0"><div class="range-ends"><span>ช้า</span><span>เร็ว</span></div></div><div class="voice-range"><div class="voice-range-label"><label class="label" for="pitch">ระดับเสียง</label><strong class="voice-range-value" id="pitch-value">ปกติ</strong></div><input type="range" class="voice-slider" id="pitch" min="-30" max="30" step="5" value="0"><div class="range-ends"><span>ทุ้ม</span><span>แหลม</span></div></div><div class="section-actions"><button class="button" id="save-voice">บันทึกการตั้งค่าเสียง</button><button class="button secondary" id="reset-voice">คืนค่าเริ่มต้น</button></div><p class="hint">เพื่อเสียงที่เป็นธรรมชาติที่สุด แนะนำให้ใช้ความเร็วและระดับเสียงปกติ ไม่มีการแปลข้อความอัตโนมัติ</p></section>
         <section class="panel" id="channel-panel"><div class="head"><h2>＃ ช่องแชตที่ให้อ่าน</h2></div><p class="sub">เลือกช่องข้อความที่ต้องการให้ลิลินอ่านออกเสียง ต้องมีสิทธิ์จัดการเซิร์ฟเวอร์</p><label class="label" for="channel">ช่องข้อความ</label><select id="channel"></select><div class="section-actions"><button class="button secondary" id="save-channel">บันทึกช่องแชต</button></div><p class="hint">คุณสามารถเลือกช่องด้วยคำสั่ง <code>/join</code> ใน Discord ได้เช่นกัน</p></section>
@@ -125,7 +125,9 @@
       if(!guildId)return;
       const q=await api(`/api/guilds/${guildId}/queue`);
       $('now-playing').textContent=q.connected?(q.now_playing?.title||'ยังไม่มีเพลงที่กำลังเล่น'):'ลิลินยังไม่ได้เข้าห้องเสียง';
-      $('music-state').textContent=q.connected?(q.paused?'หยุดเพลงชั่วคราวอยู่':'พร้อมควบคุมเพลงแล้วค่ะ'):'พิมพ์ /join ใน Discord เพื่อเชื่อมต่อ';
+      $('music-state').textContent=!q.connected?'พิมพ์ /join ใน Discord เพื่อเชื่อมต่อ':
+        q.music_error|| (q.playback_status==='loading'?'กำลังโหลดเสียงเพลงจาก YouTube…':
+        q.paused?'หยุดเพลงชั่วคราวอยู่':q.playback_status==='playing'?'กำลังส่งเสียงเข้าห้อง Discord':'พร้อมควบคุมเพลงแล้วค่ะ');
       $('queue-count').textContent=`รอเล่น ${q.upcoming.length} เพลง`;$('queue-repeat').value=q.repeat;
       $('queue-list').replaceChildren();
       if(!q.upcoming.length){$('queue-list').append(el('div','empty','ยังไม่มีเพลงรอเล่น เพิ่มชื่อเพลงหรือลิงก์ได้เลยค่ะ'));return}
