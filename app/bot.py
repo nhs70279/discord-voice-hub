@@ -43,7 +43,7 @@ class VoiceHubBot(commands.Bot):
         existing = self._auto_join_tasks.get(guild.id)
         if existing and not existing.done():
             return
-        task = asyncio.create_task(self._auto_join_guild(guild), name=f"autojoin-{guild.id}")
+        task = asyncio.create_task(self._auto_join_with_retry(guild), name=f"autojoin-{guild.id}")
         self._auto_join_tasks[guild.id] = task
         task.add_done_callback(lambda finished: self._auto_join_finished(guild.id, finished))
 
@@ -56,6 +56,18 @@ class VoiceHubBot(commands.Bot):
     def _log_auto_join_result(task: asyncio.Task):
         if not task.cancelled() and task.exception():
             log.error("Automatic voice join failed: %r", task.exception())
+
+    async def _auto_join_with_retry(self, guild: discord.Guild):
+        """Recover from transient Discord voice handshakes without polling forever."""
+        for delay in (0, 5, 20):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                await self._auto_join_guild(guild)
+                return
+            except (TimeoutError, ConnectionError, discord.ConnectionClosed) as error:
+                log.warning("Auto join will retry after Discord voice error: %r", error)
+        log.error("Auto join exhausted its three attempts for guild %s", guild.id)
 
     async def _connect_to_voice(self, channel: discord.VoiceChannel, *, prioritize: bool = False) -> GuildPlayer:
         guild = channel.guild
