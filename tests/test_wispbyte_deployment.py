@@ -44,6 +44,7 @@ class WispbyteDeploymentTests(unittest.TestCase):
         self.assertIn("workers=1", runner)
         self.assertIn("sha256", runner)
         self.assertIn('"SERVER_PORT"', runner)
+        self.assertIn("youtube-pot.enabled", (ROOT / ".wispbyte" / "deploy.sh").read_text())
 
     def test_runtime_and_data_are_not_committed(self):
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
@@ -96,6 +97,26 @@ class WispbyteDeploymentTests(unittest.TestCase):
             self.assertNotIn("DISCORD_TOKEN", sanitized)
             self.assertNotIn("DISCORD_CLIENT_SECRET", sanitized)
             self.assertNotIn("YOUTUBE_COOKIES_PATH", sanitized)
+
+    def test_pot_provider_uses_private_marker_without_editing_oauth_env(self):
+        with tempfile.TemporaryDirectory() as folder:
+            data = Path(folder) / "data"
+            data.mkdir()
+            (data / "youtube-pot.enabled").touch()
+            server = data / "bgutil-ytdlp-pot-provider" / "server"
+            (server / "node_modules").mkdir(parents=True)
+            (server / "src").mkdir()
+            (server / "src" / "main.ts").touch()
+            process = MagicMock()
+            process.poll.return_value = None
+            with patch.dict(os.environ, {"YOUTUBE_POT_SERVER_HOME": ""}), \
+                patch.object(start_wispbyte, "DATA", data), \
+                patch.object(start_wispbyte.shutil, "which", return_value="/opt/deno"), \
+                patch.object(start_wispbyte.subprocess, "Popen", return_value=process), \
+                patch.object(start_wispbyte.socket, "create_connection"):
+                self.assertIs(start_wispbyte.start_youtube_pot_provider(), process)
+                self.assertEqual(os.environ["YOUTUBE_POT_READY"], "1")
+            self.assertEqual(process.poll.call_count > 0, True)
 
     def test_cloudflared_binary_download_is_checksum_verified(self):
         executable_bytes = b"test cloudflared executable"
