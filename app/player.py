@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 SOUNDCLOUD_HOSTS = {"soundcloud.com", "www.soundcloud.com", "m.soundcloud.com", "on.soundcloud.com"}
 MAX_LOCAL_AUDIO_BYTES = 80 * 1024 * 1024
+MAX_TTS_WAIT_SECONDS = 30
 
 
 class MusicSourceUnavailable(RuntimeError):
@@ -458,7 +459,7 @@ class GuildPlayer:
         self.vc = vc
         self.loop = loop
         self.music_queue: MusicQueue[Track] = MusicQueue(max_size=150)
-        self.tts_queue: asyncio.Queue[tuple[str, dict]] = asyncio.Queue(maxsize=40)
+        self.tts_queue: asyncio.Queue[tuple[str, dict, float]] = asyncio.Queue(maxsize=8)
         self.music_done = asyncio.Event()
         self._music_generation = 0
         self.repeat_mode = "off"
@@ -474,6 +475,7 @@ class GuildPlayer:
         self.chat_events_in_read_channel = 0
         self.chat_messages_enqueued = 0
         self.chat_messages_private_skipped = 0
+        self.chat_messages_dropped = 0
         self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure, self._pause_audio_if_idle)
         self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
         self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
@@ -573,14 +575,20 @@ class GuildPlayer:
 
     async def _tts_worker(self):
         while True:
-            message, settings = await self.tts_queue.get()
+            message, settings, queued_at = await self.tts_queue.get()
             path: Path | None = None
             try:
+                if self.loop.time() - queued_at > MAX_TTS_WAIT_SECONDS:
+                    self.chat_messages_dropped += 1
+                    continue
                 self.last_tts_error = None
                 fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
                 os.close(fd)
                 path = Path(filename)
                 self.last_tts_engine = await synthesize_thai(message, settings, path)
+                if self.loop.time() - queued_at > MAX_TTS_WAIT_SECONDS:
+                    self.chat_messages_dropped += 1
+                    continue
                 source = discord.FFmpegPCMAudio(str(path), options="-vn")
                 self.mixer.enqueue_speech(source, path)
                 self._resume_audio()
@@ -603,8 +611,11 @@ class GuildPlayer:
 
     async def add_speech(self, message: str, settings: dict) -> bool:
         if self.tts_queue.full():
-            return False
-        self.tts_queue.put_nowait((message, settings))
+            # Prefer recent chat over speaking messages from minutes ago.
+            self.tts_queue.get_nowait()
+            self.tts_queue.task_done()
+            self.chat_messages_dropped += 1
+        self.tts_queue.put_nowait((message, settings, self.loop.time()))
         return True
 
     def skip(self):
