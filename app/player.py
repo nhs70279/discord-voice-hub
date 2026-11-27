@@ -112,14 +112,19 @@ def _youtube_access_denied(error: Exception) -> bool:
 
 
 def _youtube_client_attempts() -> list[dict]:
-    """Try separate YouTube clients so one failing client doesn't mask another."""
+    """Fallback after Safari HLS; avoid clients that require the same PO token."""
     return [
-        # Safari's HLS formats sometimes work when signed media URLs do not.
-        {"format": "bestaudio[protocol*=m3u8]/bestaudio/best",
-         "extractor_args": {"youtube": {"player_client": ["web_safari"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["android_vr"]}}},
         {"extractor_args": {"youtube": {"player_client": ["web_embedded"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["android_vr"]}}},
     ]
+
+
+def _youtube_playback_options() -> dict:
+    """Prefer Safari HLS, which can work without a GVS PO token."""
+    return {
+        "format": "bestaudio[protocol*=m3u8]/bestaudio/best",
+        "extractor_args": {"youtube": {"player_client": ["web_safari"]}},
+    }
 
 
 def discover_tracks(query: str) -> list[dict]:
@@ -176,8 +181,9 @@ def music_audio_source(url: str, title: str | None = None) -> tuple[discord.Audi
     """Prefer YouTube clients; only then try a verified SoundCloud match."""
     fallback_title = None
     options = {
-        "quiet": True, "no_warnings": True, "format": "bestaudio/best", "noplaylist": True,
+        "quiet": True, "no_warnings": True, "noplaylist": True,
         "socket_timeout": 10, "extractor_retries": 1,
+        **(_youtube_playback_options() if urlparse(url).hostname in YOUTUBE_HOSTS else {"format": "bestaudio/best"}),
         **_youtube_auth_options(),
     }
     try:
@@ -253,10 +259,11 @@ def downloaded_youtube_source(url: str) -> discord.AudioSource:
         try:
             settings = {
                 "quiet": True, "no_warnings": True, "noplaylist": True,
-                "format": "bestaudio/best", "socket_timeout": 10, "extractor_retries": 1,
+                "socket_timeout": 10, "extractor_retries": 1,
                 "outtmpl": str(Path(directory.name) / "audio.%(ext)s"),
                 "max_filesize": MAX_LOCAL_AUDIO_BYTES,
                 "progress_hooks": [check_size],
+                **_youtube_playback_options(),
                 **_youtube_auth_options(), **attempt,
             }
             with yt_dlp.YoutubeDL(settings) as downloader:
@@ -535,7 +542,24 @@ class GuildPlayer:
                     # Fetching the media through yt-dlp itself can recover playback.
                     log.warning("YouTube stream produced no audio; attempting local audio download")
                     self.playback_status = "loading"
-                    local_source = await asyncio.to_thread(downloaded_youtube_source, track.url)
+                    try:
+                        local_source = await asyncio.to_thread(downloaded_youtube_source, track.url)
+                    except Exception as youtube_error:
+                        # Even a resolved YouTube URL can be blocked by the
+                        # media CDN. Only switch to an independently matched
+                        # recording after both YouTube methods have failed.
+                        try:
+                            alternative = await asyncio.to_thread(_matching_soundcloud_track, track.title)
+                        except Exception as search_error:
+                            log.warning("SoundCloud search unavailable after YouTube failure: %s", type(search_error).__name__)
+                            alternative = None
+                        if not alternative:
+                            raise youtube_error
+                        local_source, _ = await asyncio.to_thread(
+                            music_audio_source, alternative["url"], alternative["title"]
+                        )
+                        self.last_music_fallback = alternative["title"]
+                        log.warning("YouTube media failed; using matched SoundCloud recording: %s", alternative["title"])
                     if generation != self._music_generation:
                         local_source.cleanup()
                         continue

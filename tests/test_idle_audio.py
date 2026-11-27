@@ -174,6 +174,33 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(self.player.mixer.read(), SILENCE)
             self.assertIsNone(self.player.last_music_error)
 
+    async def test_youtube_stream_and_download_failure_uses_matching_soundcloud_recording(self):
+        matched = {"url": "https://soundcloud.com/artist/song", "title": "Artist - Song"}
+        source = FakeAudioSource([bytes([5]) * FRAME_BYTES])
+
+        def resolve(url, title):
+            if url == matched["url"]:
+                return source, None
+            return FakeAudioSource([]), None
+
+        with patch.object(self.module, "music_audio_source", side_effect=resolve), \
+             patch.object(self.module, "downloaded_youtube_source", side_effect=self.module.MusicSourceUnavailable("YouTube blocked")), \
+             patch.object(self.module, "_matching_soundcloud_track", return_value=matched) as search:
+            self.player.add_tracks([self.module.Track("Artist - Song", "https://www.youtube.com/watch?v=abc", "user")])
+            for _ in range(100):
+                if self.player.mixer.music is not None:
+                    break
+                await asyncio.sleep(0.01)
+            self.player.mixer.read()  # Initial YouTube stream produces no frames.
+            for _ in range(100):
+                if self.player.mixer.music is source:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertIs(self.player.mixer.music, source)
+            self.assertEqual(self.player.last_music_fallback, "Artist - Song")
+            search.assert_called_once_with("Artist - Song")
+            self.assertNotEqual(self.player.mixer.read(), SILENCE)
+
 
 if __name__ == "__main__":
     unittest.main()
