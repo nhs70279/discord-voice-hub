@@ -4,7 +4,9 @@
 
 読み上げはリリン固有のタイ語女性ニューラル音声（`th-TH-PremwadeeNeural`）に統一しました。ユーザーごとの話速・音程設定は残し、初期値は声を不自然に変えない `0%` / `0 Hz` です。既存の男性声・他言語音声設定はDB起動時にリリンの声へ移行します（個人の話速、音程、プレイリストは保持）。「最も自然な声」の絶対評価はできず、実際の音質はEdge TTSサービスと文章に依存します。
 
-> **Google Cloud e2-microへの移行：** [Ubuntu 24.04・Tailscale Funnel・systemdによる導入手順（日本語）](docs/GOOGLE_CLOUD_E2_MICRO_JA.md)。`deploy/gcp-install.sh` を使い、Botと管理画面を同じ1GiB RAMのVMで実行します。**e2-micro本体は無料枠がありますが、通常の外部IPv4が約 $0.005/時、無料アウトバウンドは月1GBまでなので完全無料は保証できません。** 課金条件を確認してからVMを作成してください。
+> **Wispbyte Freeへの移行（第1候補）：** [Wispbyte無料Pythonサーバー・Webサブドメイン・Discord OAuth導入手順（日本語）](docs/WISPBYTE_JA.md)。`start_wispbyte.py`と`requirements.wispbyte.txt`でBot・管理画面を1プロセスで起動。メモリ512MBと共有IPの制約により、音声/YouTubeの正常動作は実環境テストが必要です。無料枠の維持には14日ごとのパネルログインが必要です。
+
+> **Google Cloud e2-microへの移行（費用に注意）：** [Ubuntu 24.04・Tailscale Funnel・systemdによる導入手順（日本語）](docs/GOOGLE_CLOUD_E2_MICRO_JA.md)。`deploy/gcp-install.sh` を使い、Botと管理画面を同じ1GiB RAMのVMで実行します。**e2-micro本体は無料枠がありますが、通常の外部IPv4が約 $0.005/時、無料アウトバウンドは月1GBまでなので完全無料は保証できません。** 課金条件を確認してからVMを作成してください。
 
 > **Northflankへの移行（未実施）：** [Northflank導入・Fly.ioからのSQLite移行手順（日本語）](docs/NORTHFLANK_JA.md)。現在のDockerfileを再利用して、単一の常時稼働サービスでDiscord Botとタイ語Webダッシュボードを動かします。サービス作成時は無料プランでもカードによる本人確認が要求される場合があります。
 
