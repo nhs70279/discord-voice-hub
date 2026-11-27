@@ -8,6 +8,26 @@ from app.bot import VoiceHubBot
 
 
 class MessageDedupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auto_join_retries_a_transient_voice_timeout(self):
+        bot = VoiceHubBot()
+        guild = SimpleNamespace(id=123)
+        with patch.object(bot, "_auto_join_guild", new_callable=AsyncMock) as join, \
+             patch("app.bot.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            join.side_effect = [TimeoutError(), None]
+            await bot._auto_join_with_retry(guild)
+        self.assertEqual(join.await_count, 2)
+        sleep.assert_awaited_once_with(5)
+
+    async def test_auto_join_stops_after_three_failed_attempts(self):
+        bot = VoiceHubBot()
+        guild = SimpleNamespace(id=123)
+        with patch.object(bot, "_auto_join_guild", new_callable=AsyncMock) as join, \
+             patch("app.bot.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            join.side_effect = TimeoutError()
+            await bot._auto_join_with_retry(guild)
+        self.assertEqual(join.await_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [5, 20])
+
     async def test_same_discord_message_is_only_spoken_once(self):
         bot = VoiceHubBot()
         player = SimpleNamespace(
