@@ -2,7 +2,7 @@
 
 対象: [リリン（ลิลิน）](https://github.com/nhs70279/discord-voice-hub) のDiscord Gateway・タイ語TTS・音楽再生・タイ語Web管理画面を**無料のPythonサーバー1台**で起動する。
 
-> **状態:** Wispbyte用の起動ファイル・依存関係・手順を準備済み。実際のWispbyteサーバー作成、音声疎通、YouTubeの再生、OAuthログインは未実施。無料ホストではCPU/メモリや共有IPの制約があるため、音声を含めた正常動作を保証するものではない。
+> **状態（2026-11-27）:** Wispbyte Freeの`lilin-voice-hub`を作成済み。Discordログイン・ボイス接続とWebサーバー起動を確認済み。実際のTTS/YouTube音声の聴取とWeb OAuthログインは未検証。無料ホストではCPU/メモリや共有IPの制約があるため、音声を含めた正常動作を保証するものではない。
 
 ## 無料プランの条件
 
@@ -31,15 +31,15 @@ Wispbyteの案内ではメモリ512MB、通常時CPUの約35%、ディスク1GB�
 
 ## 2. Web管理画面のHTTPSアドレス
 
-1. Wispbyteのサーバーの **Subdomains（Beta）** から無料のサブドメインを有効にする。HTTPS証明書の準備が完了し、公開URLが開けることを確認する。
-2. サブドメインは、Wispbyteがサーバーに割り当てた**Primary Port**へ接続される。このプロジェクトの`start_wispbyte.py`は`SERVER_PORT`（なければ`PORT`）を読み、FastAPIを`0.0.0.0`で起動する。URLに追加の`:ポート番号`を付けない。
-3. `/healthz` がHTTP 200を返すことを確認する。Discord Token未設定なら`discord_connected:false`になるのは正常。
+WispbyteのSubdomains（Beta）はサーバーの割り当てポートへの**名前解決**であり、BotのPythonポートにHTTPS証明書を付ける仕組みではない。`https://lilin-voice-hub.wispbyte.app/`はWeb管理画面につながらないため、Discord OAuthのURLに設定しない。
 
-サブドメインがBetaであることに注意。SSLエラーや502/503/526が発生したらWispbyte側のSubdomainとPrimary Portの対応を確認する。パスワードやBot TokenをURLへ含めない。
+ドメインを新たに買わず、既存の別プロジェクトのドメインも使わないため、**Cloudflare Workers + Workers VPC + Cloudflare Tunnel**で`https://lilin-voice-hub.jp777.workers.dev`をHTTPS入口にする。接続手順と安全上の注意は[Cloudflare Workers VPCガイド](CLOUDFLARE_WORKERS_VPC_JA.md)を参照。
+
+Pythonサーバー自体は`SERVER_PORT`（なければ`PORT`）にバインドする。Wispbyteが割り当てるPrimary Portは`13225`。Bot TokenやOAuth認証情報を公開HTTP側で入力してはいけない。
 
 ## 3. Discord認証を設定
 
-1. [Discord Developer Portal](https://discord.com/developers/applications) → リリンのアプリケーション → **OAuth2 → Redirects** に `https://実際のWispbyteサブドメイン/auth/callback` を登録する。
+1. [Discord Developer Portal](https://discord.com/developers/applications) → リリンのアプリケーション → **OAuth2 → Redirects** に `https://lilin-voice-hub.jp777.workers.dev/auth/callback` を登録する。
 2. **Startup → Environment Variables** から以下を設定する。パネルが任意の環境変数に対応しない場合は、プロジェクトのトップ階層に**自分だけが閲覧できる**`.env`を作り、同名の値を記入する。**GitHubには絶対にコミットしない。**
 
    | Key | Value |
@@ -47,7 +47,8 @@ Wispbyteの案内ではメモリ512MB、通常時CPUの約35%、ディスク1GB�
    | `DISCORD_TOKEN` | 既存のBot Token（秘密） |
    | `DISCORD_CLIENT_ID` | リリンのDiscord Application ID |
    | `DISCORD_CLIENT_SECRET` | OAuth Client Secret（秘密） |
-   | `DISCORD_REDIRECT_URI` | `https://実際のドメイン/auth/callback` |
+   | `DISCORD_REDIRECT_URI` | `https://lilin-voice-hub.jp777.workers.dev/auth/callback` |
+   | `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnelの秘密トークン（Cloudflareから安全に取得してWispbyteにのみ保存） |
    | `COOKIE_SECURE` | `true` |
    | `DATABASE_PATH` | 省略可。既定で`/home/container/data/voice_hub.sqlite3`相当 |
 

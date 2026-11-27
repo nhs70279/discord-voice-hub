@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import urllib.request
 import zipfile
@@ -21,6 +22,11 @@ RUNTIME = ROOT / ".runtime"
 DATA = ROOT / "data"
 DENO_ARCHIVE = "deno-x86_64-unknown-linux-gnu.zip"
 DENO_URL = f"https://github.com/denoland/deno/releases/latest/download/{DENO_ARCHIVE}"
+CLOUDFLARED_VERSION = "2026.11.2"
+CLOUDFLARED_SHA256 = "56f13335143ec0e22772963290683a84a04114a35ec64cbc794a4d39ff9bb8cf"
+CLOUDFLARED_URL = (
+    f"https://github.com/cloudflare/cloudflared/releases/download/{CLOUDFLARED_VERSION}/cloudflared-linux-amd64"
+)
 
 
 def pick_port(environment: dict[str, str] | None = None) -> int:
@@ -104,17 +110,85 @@ def configure_deno() -> None:
         log.warning("Deno unavailable; YouTube may fail until it is installed: %s", exc)
 
 
+def configure_cloudflared() -> Path | None:
+    """Prepare an optional, checksum-pinned Tunnel client without root access."""
+    if not os.getenv("CLOUDFLARE_TUNNEL_TOKEN"):
+        return None
+
+    existing = shutil.which("cloudflared")
+    if existing:
+        return Path(existing)
+
+    executable = RUNTIME / "cloudflared"
+    if executable.is_file() and os.access(executable, os.X_OK):
+        return executable
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="cloudflared-", dir=RUNTIME) as temporary:
+            downloaded = Path(temporary) / "cloudflared"
+            urllib.request.urlretrieve(CLOUDFLARED_URL, downloaded)
+            digest = hashlib.sha256()
+            with downloaded.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != CLOUDFLARED_SHA256:
+                raise ValueError("cloudflared SHA-256 mismatch")
+            downloaded.chmod(0o700)
+            downloaded.replace(executable)
+            log.info("Verified cloudflared %s installed", CLOUDFLARED_VERSION)
+            return executable
+    except (OSError, ValueError) as exc:
+        log.error("Cloudflare Tunnel cannot start: %s", exc)
+        return None
+
+
+def start_cloudflare_tunnel(executable: Path | None) -> subprocess.Popen | None:
+    """Run the tunnel beside the bot; keep its credential out of process arguments."""
+    token = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "")
+    if not token or executable is None:
+        return None
+    environment = os.environ.copy()
+    environment.pop("CLOUDFLARE_TUNNEL_TOKEN", None)
+    environment["TUNNEL_TOKEN"] = token
+    try:
+        process = subprocess.Popen(
+            [str(executable), "tunnel", "--protocol", "quic", "run"],
+            env=environment,
+            cwd=str(ROOT),
+            stdin=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        log.error("Could not launch Cloudflare Tunnel: %s", exc)
+        return None
+    log.info("Cloudflare Tunnel process started (pid %d)", process.pid)
+    return process
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=ROOT / ".env")
     configure_storage()
     configure_ffmpeg()
     configure_deno()
+
+    tunnel = start_cloudflare_tunnel(configure_cloudflared())
 
     import uvicorn
 
     port = pick_port()
     log.info("Starting Lilin bot + dashboard on Wispbyte port %d", port)
-    uvicorn.run("app.server:app", host="0.0.0.0", port=port, workers=1, loop="asyncio", http="h11")
+    try:
+        uvicorn.run("app.server:app", host="0.0.0.0", port=port, workers=1, loop="asyncio", http="h11")
+    finally:
+        if tunnel is not None and tunnel.poll() is None:
+            tunnel.terminate()
+            try:
+                tunnel.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tunnel.kill()
+                tunnel.wait(timeout=5)
 
 
 if __name__ == "__main__":
