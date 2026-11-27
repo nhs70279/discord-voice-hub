@@ -132,6 +132,25 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         self.assertTrue(self.voice.is_playing())
 
+    async def test_tts_start_is_measured_on_first_pcm_frame_only(self):
+        frame = bytes([3]) * FRAME_BYTES
+        timestamps = []
+        self.player.mixer.enqueue_speech(FakeAudioSource([frame, frame]), None, on_start=timestamps.append)
+        self.player._resume_audio()
+        self.player.mixer.read()
+        self.player.mixer.read()
+        await asyncio.sleep(0)
+        self.assertEqual(len(timestamps), 1)
+        self.assertIsInstance(timestamps[0], float)
+
+    async def test_tts_latency_breakdown_is_recorded(self):
+        self.player._record_tts_latency(1.0, 1.1, 1.3, 2.1, 2.6, 80)
+        self.assertEqual(self.player.last_tts_latency_ms, {
+            "discord": 80, "queue": 200, "synthesis": 800,
+            "playback_wait": 500, "total": 1680,
+        })
+        self.assertEqual(list(self.player.tts_latency_samples), [1680])
+
     async def test_tts_queue_drops_oldest_messages_to_keep_chat_current(self):
         # Don't let the worker consume messages during this queue-capacity test.
         self.player.tts_task.cancel()
@@ -149,7 +168,8 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import AsyncMock
 
         with patch.object(self.module, "synthesize_thai", new=AsyncMock()) as synthesize:
-            self.player.tts_queue.put_nowait(("old message", {}, self.player.loop.time() - 40))
+            old = self.player.loop.time() - 40
+            self.player.tts_queue.put_nowait(("old message", {}, old, old, None))
             await asyncio.wait_for(self.player.tts_queue.join(), timeout=1)
             synthesize.assert_not_awaited()
         self.assertEqual(self.player.chat_messages_dropped, 1)
