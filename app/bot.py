@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from . import db
 from .player import GuildPlayer, Track, discover_tracks, speech_text, valid_query, youtube_challenge_cooldown_seconds
+from .tts_fallback import warmup_thai
 from .voice_policy import occupied_channel, visible_to_voice_listeners
 
 log = logging.getLogger(__name__)
@@ -29,8 +30,12 @@ class VoiceHubBot(commands.Bot):
         self._seen_message_ids: dict[int, None] = {}
         self._voice_locks: dict[int, asyncio.Lock] = {}
         self._auto_join_tasks: dict[int, asyncio.Task] = {}
+        self._tts_warmup_task: asyncio.Task | None = None
 
     async def setup_hook(self):
+        # Warm the TTS service while Discord registers slash commands. The
+        # first chat never waits for this task or speaks the warm-up text.
+        self._tts_warmup_task = asyncio.create_task(warmup_thai(), name="thai-tts-warmup")
         await self.add_cog(VoiceCommands(self))
         await self.tree.sync()
 
@@ -180,6 +185,9 @@ class VoiceHubBot(commands.Bot):
 
     async def close(self):
         tasks = list(self._auto_join_tasks.values())
+        if self._tts_warmup_task and not self._tts_warmup_task.done():
+            self._tts_warmup_task.cancel()
+            tasks.append(self._tts_warmup_task)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -195,7 +203,7 @@ class VoiceHubBot(commands.Bot):
         if not player:
             raise ValueError("พิมพ์ /join เพื่อให้ลิลินเข้าห้องเสียงก่อนค่ะ")
         if not valid_query(query):
-            raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube หรือ SoundCloud แบบ HTTPS")
+            raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
         tracks = await asyncio.to_thread(discover_tracks, query)
         if not tracks:
             raise ValueError("ลิลินหาเพลงนี้ไม่เจอค่ะ")
@@ -306,6 +314,7 @@ class VoiceCommands(commands.Cog):
         lines = [
             f"🔎 discord.py: {discord.__version__} / davey: {dave_version}",
             f"🎙️ edge-tts: {edge_version}",
+            f"🔥 อุ่นเสียงอ่านครั้งแรก: {'กำลังอุ่นเครื่อง' if self.bot._tts_warmup_task and not self.bot._tts_warmup_task.done() else 'เสร็จแล้ว'}",
             f"🎵 YouTube extractor: {youtube_version} / EJS: {ejs_version} / Deno: {'พร้อม' if shutil.which('deno') else 'ไม่พบ'}",
             f"🔑 YouTube Cookies: {'ตั้งค่าพาธแล้ว' if os.getenv('YOUTUBE_COOKIES_PATH') else 'ไม่ได้ตั้งค่า'}",
             f"🌐 YouTube เส้นทางเครือข่ายอื่น: {'ตั้งค่าแล้ว' if os.getenv('YOUTUBE_PROXY_URL') else 'ไม่ได้ตั้งค่า'}",
@@ -327,7 +336,6 @@ class VoiceCommands(commands.Cog):
             f"📦 เฟรมเสียงที่สร้าง: เพลง {player.mixer.music_frames_sent} / เสียงอ่านและทดสอบ {player.mixer.speech_frames_sent}",
             f"⚠️ ส่งเสียงผิดพลาด: {player.last_transport_error or 'ไม่มี'}",
             f"🎵 เพลง: {player.playback_status}",
-            f"🔁 เพลงจาก SoundCloud สำรอง: {player.last_music_fallback or 'ไม่ได้ใช้'}",
             f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
             f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",
         ]
@@ -335,7 +343,7 @@ class VoiceCommands(commands.Cog):
             lines.append("⚠️ davey 0.2.x ยังไม่รองรับ discord.py 2.7.1 กรุณาใช้ davey 0.1.6")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อ ลิงก์ YouTube หรือ SoundCloud หรือเพลย์ลิสต์")
+    @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อ ลิงก์ YouTube หรือเพลย์ลิสต์")
     async def play(self, interaction: discord.Interaction, query: str):
         # A slash interaction must be acknowledged within three seconds. If the
         # host/Discord network already missed that window, no followup is valid.
@@ -412,8 +420,6 @@ class VoiceCommands(commands.Cog):
         names += [f"{idx}. {t.title}" for idx, t in enumerate(pending[:20], start=1)]
         if len(pending) > 20:
             names.append(f"…เหลืออีก {len(pending) - 20} เพลง")
-        if player.last_music_fallback and player.current:
-            names.append(f"🔁 ใช้เสียงสำรองจาก SoundCloud: {player.last_music_fallback}")
         if player.last_music_error:
             names.append(f"⚠️ เพลงล่าสุดมีปัญหา: {player.last_music_error}")
         if not pending:
