@@ -101,6 +101,14 @@ tests/test_core.py      音声混合・保存ロジック検証
 
 ## YouTube機能の重要な注意
 
+### Wispbyte PremiumのYouTube再生障害
+
+リリンは新しい `yt-dlp` と EJS / Deno を使い、通常のYouTube抽出に失敗した場合に `web_safari`（HLS優先）、`android_vr`、`web_embedded` を順番に試します。FFmpegが取得済みのURLから一切音声を読み込めなければ、`yt-dlp` 自身で最大80MiBまで一時的に音声ファイルをダウンロードして再試行します。ファイルは再生終了・スキップ時に削除します。`/diagnose` でエラーを確認してください。
+
+WispbyteなどのデータセンターIP全体がYouTubeにブロックされていると、この再試行だけでは再生できません。必要であれば、**使い捨ての検証用アカウント**から取得したYouTube Cookieを、Wispbyteサーバー内の非公開ファイル（所有者のみアクセスできる`chmod 600`）に保存し、`YOUTUBE_COOKIES_PATH=data/youtube-cookies.txt` を `.env` に追加できます。認証Cookieはアカウントへのアクセス権を持つ機密情報です。**GitHub、Discord、サポートチケットには絶対に載せないでください。** Cookie利用によるアカウント制限・停止リスクがあるため、普段使いのYouTubeアカウントでは行わないでください。
+
+CookieやPO Tokenを導入しても、YouTubeがサーバーIPからの通信を拒否する場合、成功を保証できません。YouTubeの公式共同視聴が目的ならDiscordのWatch Togetherを利用してください。
+
 このMVPは `yt-dlp` による曲名検索・動画URL解析とFFmpegの音声ストリーミングで動く **技術検証用の実装** です。YouTubeのAPI Servicesポリシーは、動画から音声を分離することやバックグラウンド再生を制限しています。またYouTube側の変更で再生できなくなる可能性があります。正式運用前に利用規約と音源の利用許可を確認し、必要なら再生元を許諾済みの音楽ソースへ置き換えてください。YouTubeの公式な共同視聴はDiscordの **Watch Together** を使えます。
 
 ## 制約・確認状況

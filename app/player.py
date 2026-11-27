@@ -24,6 +24,7 @@ from .tts_fallback import synthesize_thai
 log = logging.getLogger(__name__)
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 SOUNDCLOUD_HOSTS = {"soundcloud.com", "www.soundcloud.com", "m.soundcloud.com", "on.soundcloud.com"}
+MAX_LOCAL_AUDIO_BYTES = 80 * 1024 * 1024
 
 
 class MusicSourceUnavailable(RuntimeError):
@@ -88,6 +89,38 @@ def valid_query(query: str) -> bool:
     return True  # Keywords are searched on YouTube
 
 
+def _youtube_auth_options() -> dict:
+    """Use optional private cookies only when explicitly configured by the operator."""
+    path = os.getenv("YOUTUBE_COOKIES_PATH", "").strip()
+    if not path:
+        return {}
+    cookie_file = Path(path)
+    if not cookie_file.is_file() or cookie_file.stat().st_mode & 0o077:
+        # Never load an openly readable cookie jar or print its contents.
+        log.warning("YOUTUBE_COOKIES_PATH must point to an owner-only readable file")
+        return {}
+    return {"cookiefile": str(cookie_file)}
+
+
+def _youtube_access_denied(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(token in message for token in (
+        "sign in to confirm", "not a bot", "http error 403",
+        "403: forbidden", "no video formats found", "requested format is not available",
+    ))
+
+
+def _youtube_client_attempts() -> list[dict]:
+    """Try separate YouTube clients so one failing client doesn't mask another."""
+    return [
+        # Safari's HLS formats sometimes work when signed media URLs do not.
+        {"format": "bestaudio[protocol*=m3u8]/bestaudio/best",
+         "extractor_args": {"youtube": {"player_client": ["web_safari"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["android_vr"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["web_embedded"]}}},
+    ]
+
+
 def discover_tracks(query: str) -> list[dict]:
     """Resolve keywords, YouTube/SoundCloud links, or playlists (30 max)."""
     if not valid_query(query):
@@ -102,6 +135,7 @@ def discover_tracks(query: str) -> list[dict]:
         "noplaylist": False,
         "socket_timeout": 10,
         "extractor_retries": 1,
+        **_youtube_auth_options(),
     }
     try:
         with yt_dlp.YoutubeDL(settings) as downloader:
@@ -143,31 +177,25 @@ def music_audio_source(url: str, title: str | None = None) -> tuple[discord.Audi
     options = {
         "quiet": True, "no_warnings": True, "format": "bestaudio/best", "noplaylist": True,
         "socket_timeout": 10, "extractor_retries": 1,
+        **_youtube_auth_options(),
     }
     try:
         with yt_dlp.YoutubeDL(options) as downloader:
             info = downloader.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as error:
-        if urlparse(url).hostname not in YOUTUBE_HOSTS or "sign in to confirm" not in str(error).lower():
+        if urlparse(url).hostname not in YOUTUBE_HOSTS or not _youtube_access_denied(error):
             raise
-        # These supported YouTube clients can provide alternate playable formats
-        # without loading a user's account cookies. They do not guarantee that
-        # YouTube will accept traffic from this server's IP address.
-        alternate_options = {
-            **options,
-            "extractor_args": {"youtube": {"player_client": ["android_vr", "web_safari"]}},
-        }
-        try:
-            with yt_dlp.YoutubeDL(alternate_options) as downloader:
-                info = downloader.extract_info(url, download=False)
-            if info and info.get("url"):
-                log.info("YouTube stream resolved using alternate player clients")
-        except yt_dlp.utils.DownloadError as alternate_error:
-            log.warning("Alternate YouTube clients were also rejected: %s", type(alternate_error).__name__)
-            info = None
-        if info and info.get("url"):
-            # Only switch services if neither YouTube extraction path worked.
-            return _ffmpeg_stream(info), None
+        # Even on the same IP, a distinct supported client/format can succeed.
+        # This is not a way around a server-wide YouTube IP restriction.
+        for attempt in _youtube_client_attempts():
+            try:
+                with yt_dlp.YoutubeDL({**options, **attempt}) as downloader:
+                    info = downloader.extract_info(url, download=False)
+                if info and info.get("url"):
+                    log.info("YouTube audio resolved with %s", attempt["extractor_args"]["youtube"]["player_client"][0])
+                    return _ffmpeg_stream(info), None
+            except yt_dlp.utils.DownloadError as alternate_error:
+                log.warning("YouTube alternate client failed: %s", type(alternate_error).__name__)
         try:
             alternative = _matching_soundcloud_track(title or "")
             if alternative:
@@ -187,6 +215,66 @@ def music_audio_source(url: str, title: str | None = None) -> tuple[discord.Audi
                 "YouTube ต้องยืนยันการเข้าสู่ระบบ และ SoundCloud ก็โหลดเพลงนี้ไม่ได้ค่ะ"
             ) from fallback_error
     return _ffmpeg_stream(info), fallback_title
+
+
+class TemporaryAudioSource(discord.AudioSource):
+    """Close FFmpeg before deleting its private downloaded audio file."""
+
+    def __init__(self, source: discord.AudioSource, directory: tempfile.TemporaryDirectory):
+        self.source = source
+        self.directory = directory
+
+    def read(self) -> bytes:
+        return self.source.read()
+
+    def is_opus(self) -> bool:
+        return self.source.is_opus()
+
+    def cleanup(self):
+        try:
+            self.source.cleanup()
+        finally:
+            self.directory.cleanup()
+
+
+def downloaded_youtube_source(url: str) -> discord.AudioSource:
+    """Let yt-dlp fetch bytes itself if FFmpeg can't open a resolved URL."""
+    if urlparse(url).hostname not in YOUTUBE_HOSTS:
+        raise MusicSourceUnavailable("การโหลดเสียงสำรองรองรับเฉพาะ YouTube ค่ะ")
+
+    def check_size(progress: dict):
+        if progress.get("downloaded_bytes", 0) > MAX_LOCAL_AUDIO_BYTES:
+            raise MusicSourceUnavailable("ไฟล์เสียง YouTube ใหญ่เกินขีดจำกัด 80 MiB ค่ะ")
+
+    last_error = None
+    for attempt in ({}, *_youtube_client_attempts()):
+        directory = tempfile.TemporaryDirectory(prefix="lilin-audio-")
+        try:
+            settings = {
+                "quiet": True, "no_warnings": True, "noplaylist": True,
+                "format": "bestaudio/best", "socket_timeout": 10, "extractor_retries": 1,
+                "outtmpl": str(Path(directory.name) / "audio.%(ext)s"),
+                "max_filesize": MAX_LOCAL_AUDIO_BYTES,
+                "progress_hooks": [check_size],
+                **_youtube_auth_options(), **attempt,
+            }
+            with yt_dlp.YoutubeDL(settings) as downloader:
+                info = downloader.extract_info(url, download=True)
+                filename = downloader.prepare_filename(info) if info else None
+            path = Path(filename) if filename else None
+            if not path or not path.is_file() or path.stat().st_size > MAX_LOCAL_AUDIO_BYTES:
+                raise MusicSourceUnavailable("ไม่สามารถดาวน์โหลดเสียง YouTube สำหรับเล่นสำรองได้ค่ะ")
+            return TemporaryAudioSource(discord.FFmpegPCMAudio(str(path), options="-vn"), directory)
+        except yt_dlp.utils.DownloadError as error:
+            directory.cleanup()
+            if not _youtube_access_denied(error):
+                raise
+            last_error = error
+            log.warning("YouTube download retry rejected: %s", type(error).__name__)
+        except BaseException:
+            directory.cleanup()
+            raise
+    raise MusicSourceUnavailable("YouTube ปฏิเสธการดาวน์โหลดเสียงจากเซิร์ฟเวอร์นี้ค่ะ") from last_error
 
 
 def _ffmpeg_stream(info: dict | None) -> discord.AudioSource:
@@ -439,6 +527,22 @@ class GuildPlayer:
                 self.playback_status = "playing"
                 self._resume_audio()
                 await self.music_done.wait()
+                if (generation == self._music_generation and self.mixer.music_frames == 0
+                        and urlparse(track.url).hostname in YOUTUBE_HOSTS):
+                    # yt-dlp may resolve a URL that FFmpeg immediately rejects (403).
+                    # Fetching the media through yt-dlp itself can recover playback.
+                    log.warning("YouTube stream produced no audio; attempting local audio download")
+                    self.playback_status = "loading"
+                    local_source = await asyncio.to_thread(downloaded_youtube_source, track.url)
+                    if generation != self._music_generation:
+                        local_source.cleanup()
+                        continue
+                    self.music_done.clear()
+                    self.mixer.set_music(local_source)
+                    self.last_music_error = None
+                    self.playback_status = "playing"
+                    self._resume_audio()
+                    await self.music_done.wait()
                 if generation == self._music_generation and self.repeat_mode in {"one", "all"}:
                     self.music_queue.add_many([track], front=self.repeat_mode == "one")
             except asyncio.CancelledError:
