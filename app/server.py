@@ -419,9 +419,9 @@ async def queue_command(request: Request, guild_id: str, command: str, session=D
     elif command == "shuffle":
         player.music_queue.shuffle()
     elif command == "pause":
-        player.mixer.paused = True
+        player.pause_music()
     elif command == "resume":
-        player.mixer.paused = False
+        player.resume_music()
     elif command in {"repeat_off", "repeat_one", "repeat_all"}:
         player.repeat_mode = command.removeprefix("repeat_")
     else:
