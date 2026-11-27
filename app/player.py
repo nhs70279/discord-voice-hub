@@ -12,12 +12,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import discord
-import edge_tts
 import yt_dlp
 
 from .audio_mix import FRAME_BYTES, SILENCE, diagnostic_tone_frame, mix_pcm, normalize
 from .music_queue import MusicQueue
 from .tts_text import speech_text
+from .tts_fallback import synthesize_thai
 
 log = logging.getLogger(__name__)
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
@@ -237,11 +237,13 @@ class GuildPlayer:
         self.playback_status = "idle"
         self.last_music_error: str | None = None
         self.last_tts_error: str | None = None
+        self.last_tts_engine: str | None = None
         self.last_transport_error: str | None = None
         self.chat_events_seen = 0
         self.chat_events_without_content = 0
         self.chat_events_in_read_channel = 0
         self.chat_messages_enqueued = 0
+        self.chat_messages_private_skipped = 0
         self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure)
         self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
         self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
@@ -304,15 +306,7 @@ class GuildPlayer:
                 fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
                 os.close(fd)
                 path = Path(filename)
-                await asyncio.wait_for(
-                    edge_tts.Communicate(
-                        text=message,
-                        voice=settings["voice"],
-                        rate=f'{settings["rate"]:+d}%',
-                        pitch=f'{settings["pitch"]:+d}Hz',
-                    ).save(str(path)),
-                    timeout=30,
-                )
+                self.last_tts_engine = await synthesize_thai(message, settings, path)
                 source = discord.FFmpegPCMAudio(str(path), options="-vn")
                 self.mixer.enqueue_speech(source, path)
                 path = None  # Mixer now owns this file
@@ -320,7 +314,12 @@ class GuildPlayer:
                 raise
             except Exception as error:
                 status = getattr(error, "status", None)
-                self.last_tts_error = f"{type(error).__name__} (HTTP {status})" if status else type(error).__name__
+                details = str(error)[:120] if isinstance(error, RuntimeError) else ""
+                self.last_tts_error = (
+                    f"{type(error).__name__} (HTTP {status})" if status
+                    else f"{type(error).__name__}: {details}" if details
+                    else type(error).__name__
+                )
                 log.exception("TTS failed")
             finally:
                 if path:
