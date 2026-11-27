@@ -76,6 +76,21 @@ class OAuthSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.headers["Retry-After"], "45")
         self.assertEqual(calls, 1)
 
+    async def test_web_settings_toggle_auto_join_and_schedule_existing_listeners(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"DATABASE_PATH": str(Path(directory) / "test.sqlite3")}):
+                server.db.initialize()
+                guild = SimpleNamespace(id=123)
+                bot = SimpleNamespace(get_guild=lambda ident: guild, schedule_auto_join=MagicMock())
+                request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(bot=bot)))
+                admin = {"permissions": str(0x28)}
+                await server.update_guild_settings(request, "123", server.GuildSetting(auto_join_enabled=False), admin)
+                self.assertFalse(server.db.get_auto_join("123"))
+                bot.schedule_auto_join.assert_not_called()
+                await server.update_guild_settings(request, "123", server.GuildSetting(auto_join_enabled=True), admin)
+                self.assertTrue(server.db.get_auto_join("123"))
+                bot.schedule_auto_join.assert_called_once_with(guild)
+
     async def test_temporary_discord_error_is_not_reported_as_expired_session(self):
         for status, expected in ((403, 403), (429, 503), (502, 503), (401, 401)):
             with self.subTest(status=status):
