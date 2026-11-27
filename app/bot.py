@@ -26,6 +26,7 @@ class VoiceHubBot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.guild_players: dict[int, GuildPlayer] = {}
         self.last_message: dict[tuple[int, int], float] = {}
+        self._seen_message_ids: dict[int, None] = {}
         self._voice_locks: dict[int, asyncio.Lock] = {}
         self._auto_join_tasks: dict[int, asyncio.Task] = {}
 
@@ -127,6 +128,12 @@ class VoiceHubBot(commands.Bot):
         if not visible_to_voice_listeners(message.channel, player.vc.channel):
             player.chat_messages_private_skipped += 1
             return
+        # Discord reconnects and overlapping handlers must not read a message twice.
+        if message.id in self._seen_message_ids:
+            return
+        self._seen_message_ids[message.id] = None
+        if len(self._seen_message_ids) > 2048:
+            del self._seen_message_ids[next(iter(self._seen_message_ids))]
         # Per-author, per-guild cooldown: spam should not flood TTS.
         key = (message.guild.id, message.author.id)
         now = asyncio.get_running_loop().time()
