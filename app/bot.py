@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from . import db
 from .player import GuildPlayer, Track, discover_tracks, speech_text, valid_query
+from .voice_policy import occupied_channel, visible_to_voice_listeners
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ class VoiceHubBot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.guild_players: dict[int, GuildPlayer] = {}
         self.last_message: dict[tuple[int, int], float] = {}
+        self._voice_locks: dict[int, asyncio.Lock] = {}
+        self._auto_join_tasks: dict[int, asyncio.Task] = {}
 
     async def setup_hook(self):
         await self.add_cog(VoiceCommands(self))
@@ -29,20 +32,98 @@ class VoiceHubBot(commands.Bot):
 
     async def on_ready(self):
         log.info("Logged into Discord as %s", self.user)
+        for guild in self.guilds:
+            self.schedule_auto_join(guild)
+
+    def schedule_auto_join(self, guild: discord.Guild):
+        existing = self._auto_join_tasks.get(guild.id)
+        if existing and not existing.done():
+            return
+        task = asyncio.create_task(self._auto_join_guild(guild), name=f"autojoin-{guild.id}")
+        self._auto_join_tasks[guild.id] = task
+        task.add_done_callback(lambda finished: self._auto_join_finished(guild.id, finished))
+
+    def _auto_join_finished(self, guild_id: int, task: asyncio.Task):
+        if self._auto_join_tasks.get(guild_id) is task:
+            self._auto_join_tasks.pop(guild_id, None)
+        self._log_auto_join_result(task)
+
+    @staticmethod
+    def _log_auto_join_result(task: asyncio.Task):
+        if not task.cancelled() and task.exception():
+            log.error("Automatic voice join failed: %r", task.exception())
+
+    async def _connect_to_voice(self, channel: discord.VoiceChannel, *, prioritize: bool = False) -> GuildPlayer:
+        guild = channel.guild
+        lock = self._voice_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            player = self.guild_players.get(guild.id)
+            if player and player.vc.is_connected():
+                if player.vc.channel != channel:
+                    if not prioritize and occupied_channel(guild, player.vc.channel) == player.vc.channel:
+                        return player
+                    await player.vc.move_to(channel)
+                return player
+            if player:
+                self.guild_players.pop(guild.id, None)
+                await player.shutdown()
+            vc = guild.voice_client
+            if vc and not vc.is_connected():
+                await vc.disconnect(force=True)
+                vc = None
+            if vc:
+                if vc.channel != channel:
+                    await vc.move_to(channel)
+            else:
+                vc = await channel.connect()
+            try:
+                player = GuildPlayer(vc, asyncio.get_running_loop())
+            except Exception:
+                await vc.disconnect(force=True)
+                raise
+            self.guild_players[guild.id] = player
+            return player
+
+    async def _auto_join_guild(self, guild: discord.Guild):
+        if not db.get_auto_join(guild.id):
+            return
+        player = self.guild_players.get(guild.id)
+        current = player.vc.channel if player and player.vc.is_connected() else None
+        target = occupied_channel(guild, current)
+        if target is not None:
+            await self._connect_to_voice(target)
+        elif player:
+            await self.leave_guild(guild.id)
+
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        if member.bot or before.channel == after.channel:
+            return
+        try:
+            await self._auto_join_guild(member.guild)
+        except Exception:
+            log.exception("Could not auto join/move in guild %s", member.guild.id)
 
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
             return
         player = self.guild_players.get(message.guild.id)
+        if db.get_auto_join(message.guild.id):
+            author_voice = getattr(getattr(message.author, "voice", None), "channel", None)
+            if isinstance(author_voice, discord.VoiceChannel) and (not player or not player.vc.is_connected() or player.vc.channel != author_voice):
+                try:
+                    player = await self._connect_to_voice(author_voice, prioritize=True)
+                except Exception:
+                    log.exception("Could not follow chat author into voice in guild %s", message.guild.id)
         if not player or not player.vc.is_connected():
             return
         player.chat_events_seen += 1
         if not message.content:
             player.chat_events_without_content += 1
             return
-        if db.get_read_channel(message.guild.id) != message.channel.id:
-            return
         player.chat_events_in_read_channel += 1
+        if not visible_to_voice_listeners(message.channel, player.vc.channel):
+            player.chat_messages_private_skipped += 1
+            return
         # Per-author, per-guild cooldown: spam should not flood TTS.
         key = (message.guild.id, message.author.id)
         now = asyncio.get_running_loop().time()
@@ -60,33 +141,22 @@ class VoiceHubBot(commands.Bot):
         user_voice = interaction.user.voice
         if not user_voice or not user_voice.channel:
             raise ValueError("กรุณาเข้าห้องเสียงก่อนค่ะ")
-        guild_id = interaction.guild.id
-        existing = self.guild_players.get(guild_id)
-        if existing:
-            if existing.vc.channel != user_voice.channel:
-                if any(not member.bot for member in existing.vc.channel.members):
-                    raise ValueError("ลิลินกำลังใช้งานในห้องเสียงอื่นอยู่ค่ะ กรุณาเข้าห้องนั้นก่อนนะคะ")
-                await existing.vc.move_to(user_voice.channel)
-            return existing
-        vc = interaction.guild.voice_client
-        if vc and vc.channel != user_voice.channel:
-            await vc.move_to(user_voice.channel)
-        elif vc is None:
-            vc = await user_voice.channel.connect()
-        try:
-            player = GuildPlayer(vc, asyncio.get_running_loop())
-        except Exception:
-            await vc.disconnect(force=True)
-            raise
-        self.guild_players[guild_id] = player
-        return player
+        if not isinstance(user_voice.channel, discord.VoiceChannel):
+            raise ValueError("กรุณาเข้าห้องเสียงปกติก่อนค่ะ")
+        return await self._connect_to_voice(user_voice.channel, prioritize=True)
 
     async def leave_guild(self, guild_id: int):
-        player = self.guild_players.pop(guild_id, None)
-        if player:
-            await player.shutdown()
+        lock = self._voice_locks.setdefault(guild_id, asyncio.Lock())
+        async with lock:
+            player = self.guild_players.pop(guild_id, None)
+            if player:
+                await player.shutdown()
 
     async def close(self):
+        tasks = list(self._auto_join_tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         for guild_id in list(self.guild_players):
             try:
                 await self.leave_guild(guild_id)
@@ -120,19 +190,27 @@ class VoiceCommands(commands.Cog):
     def __init__(self, bot: VoiceHubBot):
         self.bot = bot
 
-    @app_commands.command(name="join", description="ให้ลิลินเข้าห้องเสียงและเริ่มอ่านแชตภาษาไทย")
-    @app_commands.describe(channel="ช่องข้อความที่จะอ่าน (เว้นว่างเพื่อใช้ช่องปัจจุบัน)")
-    async def join(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None):
+    @app_commands.command(name="join", description="ให้ลิลินเข้าห้องเสียงและอ่านแชตภาษาไทยจากทุกช่อง")
+    async def join(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
             player = await self.bot.ensure_player(interaction)
-            selected = channel or interaction.channel
-            if not selected or not isinstance(selected, (discord.TextChannel, discord.Thread)):
-                raise ValueError("กรุณาใช้ /join ในช่องข้อความค่ะ")
-            db.set_read_channel(interaction.guild_id, selected.id)
-            await interaction.followup.send(f"💜 ลิลินมาแล้วค่ะ! อยู่ที่ {player.vc.channel.mention} และจะอ่านแชตจาก {selected.mention} ให้อัตโนมัตินะคะ", ephemeral=True)
+            await interaction.followup.send(f"💜 ลิลินมาแล้วค่ะ! อยู่ที่ {player.vc.channel.mention} และจะอ่านแชตจากทุกช่อง รวมถึงแชตในห้องเสียงค่ะ", ephemeral=True)
         except Exception as error:
             await interaction.followup.send(str(error), ephemeral=True)
+
+    @app_commands.command(name="autojoin", description="เปิดหรือปิดการเข้าห้องเสียงอัตโนมัติของลิลิน")
+    @app_commands.default_permissions(manage_guild=True)
+    async def autojoin(self, interaction: discord.Interaction, enabled: bool):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("ต้องมีสิทธิ์จัดการเซิร์ฟเวอร์ค่ะ", ephemeral=True)
+        db.set_auto_join(interaction.guild.id, enabled)
+        if enabled:
+            self.bot.schedule_auto_join(interaction.guild)
+        await interaction.response.send_message(
+            "💜 เปิดการเข้าห้องเสียงอัตโนมัติแล้วค่ะ" if enabled else "ปิดการเข้าห้องเสียงอัตโนมัติแล้วค่ะ",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="testaudio", description="ทดสอบเสียงของลิลินโดยไม่ใช้ YouTube หรือบริการเสียงอ่าน")
     async def test_audio(self, interaction: discord.Interaction):
@@ -180,7 +258,6 @@ class VoiceCommands(commands.Cog):
             edge_version = importlib.metadata.version("edge-tts")
         except importlib.metadata.PackageNotFoundError:
             edge_version = "ไม่พบ"
-        read_channel = db.get_read_channel(interaction.guild_id)
         voice_state = getattr(player.vc, "_connection", None)
         dave_session = getattr(voice_state, "dave_session", None)
         dave_ready = bool(dave_session and getattr(dave_session, "ready", False))
@@ -188,10 +265,13 @@ class VoiceCommands(commands.Cog):
         lines = [
             f"🔎 discord.py: {discord.__version__} / davey: {dave_version}",
             f"🎙️ edge-tts: {edge_version}",
-            f"📝 ช่องแชตที่อ่าน: {f'<#{read_channel}>' if read_channel else 'ยังไม่ได้ตั้งค่า กรุณาใช้ /join'}",
-            f"📨 แชตที่ได้รับ: {player.chat_events_seen} / ช่องที่อ่าน: {player.chat_events_in_read_channel} / เข้าคิวเสียง: {player.chat_messages_enqueued}",
+            "📝 ช่องแชตที่อ่าน: ทุกช่อง รวมถึงแชตในห้องเสียง",
+            f"🚪 เข้าห้องเสียงอัตโนมัติ: {'เปิด' if db.get_auto_join(interaction.guild_id) else 'ปิด'}",
+            f"📨 แชตที่ได้รับ: {player.chat_events_seen} / มีข้อความ: {player.chat_events_in_read_channel} / เข้าคิวเสียง: {player.chat_messages_enqueued}",
             f"⚠️ แชตไม่มีเนื้อหา: {player.chat_events_without_content}",
+            f"🔒 แชตส่วนตัวที่ไม่อ่านเพื่อความปลอดภัย: {player.chat_messages_private_skipped}",
             f"🎙️ คิวเสียงอ่าน: {player.tts_queue.qsize()} / ตัวสร้างเสียงทำงาน: {'ใช่' if not player.tts_task.done() else 'ไม่'}",
+            f"🎙️ เครื่องสร้างเสียงล่าสุด: {player.last_tts_engine or 'ยังไม่ได้สร้างเสียง'}",
             f"🔐 DAVE เข้ารหัสพร้อม: {'ใช่' if dave_ready else 'ไม่'} (protocol {dave_protocol})",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
             f"📡 ส่งเสียง: {'ใช่' if player.vc.is_playing() else 'ไม่'}",
