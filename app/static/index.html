@@ -69,16 +69,16 @@
         <button class="nav-item active" data-target="read-panel">◉　ตั้งค่าเสียงอ่าน</button>
         <button class="nav-item" data-target="queue-panel">▶　คิวเพลง</button>
         <button class="nav-item" data-target="playlists-panel">♫　เพลย์ลิสต์</button>
-        <button class="nav-item" data-target="channel-panel">⚙　ตั้งค่าช่องแชต</button>
+        <button class="nav-item" data-target="channel-panel">⚙　เข้าห้องเสียงอัตโนมัติ</button>
       </nav>
       <div class="side-bottom"><span class="status"><span id="dot" class="dot"></span><span id="status">กำลังตรวจสอบการเชื่อมต่อ</span></span><span id="username"></span><button class="logout" id="logout">ออกจากระบบ</button></div>
     </aside>
     <main>
       <div class="topline"><div><p class="eyebrow">พื้นที่ส่วนตัวของคุณกับลิลิน</p><h1>แผงควบคุม</h1><p class="muted">ตั้งค่าเสียงอ่าน จัดคิวเพลง และสร้างเพลย์ลิสต์ได้ในที่เดียว</p></div><span class="pill">ผู้ช่วยเสียงและเพลง</span></div>
-      <section class="hero"><div><p class="eyebrow">เริ่มต้นกับลิลิน</p><h2>พิมพ์ <code>/join</code> ใน Discord ได้เลยค่ะ</h2><p>เมื่อฉันเข้าห้องเสียงแล้ว จะเริ่มอ่านข้อความจากช่องแชตที่เลือกให้อัตโนมัติ 💜</p></div><img class="hero-avatar" src="/static/lilin-avatar.png" alt="ลิลิน ราชินีแห่งโลกอนาคต"></section>
+      <section class="hero"><div><p class="eyebrow">เริ่มต้นกับลิลิน</p><h2>ลิลินเข้าห้องเสียงให้อัตโนมัติค่ะ</h2><p>เมื่อมีคนเข้าห้องเสียง ฉันจะตามไปและอ่านข้อความจากทุกช่องในเซิร์ฟเวอร์ รวมถึงแชตในห้องเสียงด้วยค่ะ 💜</p></div><img class="hero-avatar" src="/static/lilin-avatar.png" alt="ลิลิน ราชินีแห่งโลกอนาคต"></section>
       <div class="grid">
         <section class="panel" id="read-panel"><div class="head"><h2>🔊 เสียงอ่านของลิลิน</h2><span class="pill">ภาษาไทย</span></div><p class="sub">ลิลินใช้เสียงผู้หญิงภาษาไทยแบบ Neural เพื่อให้น้ำเสียงเป็นธรรมชาติ คุณสามารถปรับความเร็วและระดับเสียงของข้อความตัวเองได้</p><label class="label" for="voice">เสียงประจำตัวของลิลิน</label><select id="voice" disabled></select><div class="voice-range"><div class="voice-range-label"><label class="label" for="rate">ความเร็วในการพูด</label><strong class="voice-range-value" id="rate-value">ปกติ</strong></div><input type="range" class="voice-slider" id="rate" min="-40" max="40" step="5" value="0"><div class="range-ends"><span>ช้า</span><span>เร็ว</span></div></div><div class="voice-range"><div class="voice-range-label"><label class="label" for="pitch">ระดับเสียง</label><strong class="voice-range-value" id="pitch-value">ปกติ</strong></div><input type="range" class="voice-slider" id="pitch" min="-30" max="30" step="5" value="0"><div class="range-ends"><span>ทุ้ม</span><span>แหลม</span></div></div><div class="section-actions"><button class="button" id="save-voice">บันทึกการตั้งค่าเสียง</button><button class="button secondary" id="reset-voice">คืนค่าเริ่มต้น</button></div><p class="hint">เพื่อเสียงที่เป็นธรรมชาติที่สุด แนะนำให้ใช้ความเร็วและระดับเสียงปกติ ไม่มีการแปลข้อความอัตโนมัติ</p></section>
-        <section class="panel" id="channel-panel"><div class="head"><h2>＃ ช่องแชตที่ให้อ่าน</h2></div><p class="sub">เลือกช่องข้อความที่ต้องการให้ลิลินอ่านออกเสียง ต้องมีสิทธิ์จัดการเซิร์ฟเวอร์</p><label class="label" for="channel">ช่องข้อความ</label><select id="channel"></select><div class="section-actions"><button class="button secondary" id="save-channel">บันทึกช่องแชต</button></div><p class="hint">คุณสามารถเลือกช่องด้วยคำสั่ง <code>/join</code> ใน Discord ได้เช่นกัน</p></section>
+        <section class="panel" id="channel-panel"><div class="head"><h2>⚙️ เข้าห้องเสียงอัตโนมัติ</h2></div><p class="sub">ลิลินอ่านข้อความจากทุกช่องข้อความและแชตในห้องเสียง ไม่ต้องเลือกช่องค่ะ</p><label class="label" for="auto-join"><input type="checkbox" id="auto-join" checked> เข้าห้องเสียงอัตโนมัติเมื่อมีคนอยู่</label><div class="section-actions"><button class="button secondary" id="save-auto-join">บันทึกการตั้งค่า</button></div><p class="hint">หากมีหลายห้องเสียง ลิลินจะให้ความสำคัญกับห้องของคนที่พิมพ์แชตล่าสุด และคุณยังใช้คำสั่ง <code>/join</code> ได้ค่ะ</p></section>
         <section class="panel wide" id="queue-panel"><div class="head"><h2>▶ เล่นเพลงและจัดคิว</h2><span class="pill" id="queue-count">รอเล่น 0 เพลง</span></div><p class="sub">ค้นหาด้วยชื่อเพลงหรือลิงก์ YouTube แล้วเลือกเพิ่มในคิว เล่นเพลงถัดไป หรือเล่นทันทีได้เลยค่ะ</p>
           <div class="queue-now"><p class="eyebrow">กำลังเล่น</p><strong id="now-playing">ลิลินยังไม่ได้เข้าห้องเสียง</strong><p class="hint" id="music-state" style="margin-top:8px">ใช้คำสั่ง /join เพื่อเชื่อมต่อ</p></div>
           <label class="label" for="queue-query">เพลงที่ต้องการฟัง</label><input class="field" id="queue-query" maxlength="400" placeholder="ชื่อเพลง / ลิงก์ YouTube / ลิงก์เพลย์ลิสต์">
@@ -115,10 +115,9 @@
     async function refreshGuild(){
       playlistId=null;$('playlist-editor').classList.add('hidden');$('playlist-placeholder').classList.remove('hidden');$('current-playlist-name').textContent='รายการเพลง';
       if(!guildId){$('playlist-list').replaceChildren(el('div','empty','ยังไม่มีเซิร์ฟเวอร์ที่มีลิลินอยู่ค่ะ'));$('queue-list').replaceChildren();return}
-      const current=selectedGuild();$('save-channel').disabled=!current.admin;
-      const [channels,settings,playlists]=await Promise.all([api(`/api/guilds/${guildId}/channels`),api(`/api/guilds/${guildId}/settings`),api(`/api/guilds/${guildId}/playlists`)]);
-      $('channel').replaceChildren();for(const c of channels)option($('channel'),c.id,'# '+c.name);
-      if(settings.read_channel_id)$('channel').value=String(settings.read_channel_id);
+      const current=selectedGuild();$('save-auto-join').disabled=!current.admin;$('auto-join').disabled=!current.admin;
+      const [settings,playlists]=await Promise.all([api(`/api/guilds/${guildId}/settings`),api(`/api/guilds/${guildId}/playlists`)]);
+      $('auto-join').checked=settings.auto_join_enabled;
       drawPlaylists(playlists);
       await refreshQueue();
     }
@@ -126,7 +125,7 @@
       if(!guildId)return;
       const q=await api(`/api/guilds/${guildId}/queue`);
       $('now-playing').textContent=q.connected?(q.now_playing?.title||'ยังไม่มีเพลงที่กำลังเล่น'):'ลิลินยังไม่ได้เข้าห้องเสียง';
-      $('music-state').textContent=!q.connected?'พิมพ์ /join ใน Discord เพื่อเชื่อมต่อ':
+      $('music-state').textContent=!q.connected?'ลิลินจะเข้าห้องเสียงเมื่อมีคนเข้ามา หรือใช้ /join ได้ค่ะ':
         q.music_error|| (q.tts_error?`เสียงอ่านมีปัญหา (${q.tts_error}) กรุณาใช้ /diagnose ใน Discord`:'')|| (q.playback_status==='loading'?'กำลังโหลดเสียงเพลงจาก YouTube…':
         q.paused?'หยุดเพลงชั่วคราวอยู่':q.playback_status==='playing'?'กำลังส่งเสียงเข้าห้อง Discord':'พร้อมควบคุมเพลงแล้วค่ะ');
       $('queue-count').textContent=`รอเล่น ${q.upcoming.length} เพลง`;$('queue-repeat').value=q.repeat;
@@ -187,7 +186,7 @@
     $('rate').oninput=renderVoiceNumbers;$('pitch').oninput=renderVoiceNumbers;
     $('save-voice').onclick=()=>action(async()=>{await api('/api/me/voice','PUT',{voice:$('voice').value,rate:Number($('rate').value),pitch:Number($('pitch').value)});notify('บันทึกการตั้งค่าเสียงแล้วค่ะ')});
     $('reset-voice').onclick=()=>{$('rate').value=0;$('pitch').value=0;renderVoiceNumbers()};
-    $('save-channel').onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/settings`,'PUT',{channel_id:$('channel').value});notify('บันทึกช่องแชตแล้วค่ะ')});
+    $('save-auto-join').onclick=()=>action(async()=>{await api(`/api/guilds/${guildId}/settings`,'PUT',{auto_join_enabled:$('auto-join').checked});notify('บันทึกการเข้าห้องเสียงอัตโนมัติแล้วค่ะ')});
     $('queue-play').onclick=()=>action(()=>sendMusic('normal'));
     $('queue-next').onclick=()=>action(()=>sendMusic('next'));
     $('queue-now').onclick=()=>action(()=>sendMusic('now'));
