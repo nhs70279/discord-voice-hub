@@ -103,13 +103,20 @@ def _youtube_verification_message() -> str:
 
 
 def _youtube_playback_options() -> dict:
-    """Use mweb with a live local PO-token provider, else prefer Safari HLS."""
+    """Ask yt-dlp for YouTube clients in one extraction, without retry loops.
+
+    The provider can supply a GVS token for mweb, but some hosting IPs receive
+    LOGIN_REQUIRED before token generation. Other YouTube clients may still
+    expose permitted formats. This never switches music platforms.
+    """
     # This flag is set only after the local provider actually starts. Merely
     # installing the yt-dlp plugin does not create any PO tokens.
     provider_ready = os.getenv("YOUTUBE_POT_READY") == "1"
     return {
         "format": "bestaudio[protocol*=m3u8]/bestaudio/best",
-        "extractor_args": {"youtube": {"player_client": ["mweb" if provider_ready else "web_safari"]}},
+        "extractor_args": {"youtube": {"player_client": (
+            ["mweb", "tv", "web_safari"] if provider_ready else ["web_safari"]
+        )}},
     }
 
 

@@ -358,7 +358,7 @@ class VoiceCommands(commands.Cog):
         try:
             await self.bot.ensure_player(interaction)
             count = await self.bot.enqueue_query(interaction.guild_id, query, str(interaction.user.id))
-            await interaction.followup.send(f"🎵 รับเพลงเข้าคิวแล้ว {count} เพลงค่ะ กำลังตรวจสอบแหล่งเสียงก่อนเล่นนะคะ", ephemeral=True)
+            await interaction.followup.send(f"🎵 เพิ่มเพลงจาก YouTube เข้าคิวแล้ว {count} เพลงค่ะ กำลังเริ่มเล่นนะคะ", ephemeral=True)
         except Exception as error:
             log.warning("Play failed: %s", error)
             await interaction.followup.send(f"ขอโทษค่ะ เล่นเพลงไม่ได้: {error}", ephemeral=True)
