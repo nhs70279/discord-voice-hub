@@ -1,6 +1,7 @@
 """Discord slash commands. /join immediately enables channel TTS."""
 
 import asyncio
+import importlib.util
 import logging
 
 import discord
@@ -126,6 +127,36 @@ class VoiceCommands(commands.Cog):
             await interaction.followup.send(f"💜 ลิลินมาแล้วค่ะ! อยู่ที่ {player.vc.channel.mention} และจะอ่านแชตจาก {selected.mention} ให้อัตโนมัตินะคะ", ephemeral=True)
         except Exception as error:
             await interaction.followup.send(str(error), ephemeral=True)
+
+    @app_commands.command(name="testaudio", description="ทดสอบเสียงของลิลินโดยไม่ใช้ YouTube หรือบริการเสียงอ่าน")
+    async def test_audio(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            player = await self.bot.ensure_player(interaction)
+            player.play_test_tone()
+            await interaction.followup.send(
+                "🔊 ลิลินกำลังเล่นเสียงทดสอบสั้น ๆ ค่ะ หากไม่ได้ยิน ให้ตรวจสอบเสียงใน Discord หรือใช้ /diagnose",
+                ephemeral=True,
+            )
+        except Exception as error:
+            log.warning("Voice test failed: %s", error)
+            await interaction.followup.send(f"ทดสอบเสียงไม่สำเร็จ: {error}", ephemeral=True)
+
+    @app_commands.command(name="diagnose", description="ตรวจสอบการเชื่อมต่อเสียงและสถานะเพลงของลิลิน")
+    async def diagnose(self, interaction: discord.Interaction):
+        player = self.bot.guild_players.get(interaction.guild_id)
+        if player is None:
+            return await interaction.response.send_message("ลิลินยังไม่ได้เข้าห้องเสียงค่ะ กรุณาใช้ /join ก่อน", ephemeral=True)
+        dave = "พร้อม" if importlib.util.find_spec("davey") else "ไม่พบ"
+        lines = [
+            f"🔎 discord.py: {discord.__version__} / DAVE: {dave}",
+            f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
+            f"📡 ส่งเสียง: {'ใช่' if player.vc.is_playing() else 'ไม่'}",
+            f"🎵 เพลง: {player.playback_status}",
+            f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
+            f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",
+        ]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อหรือลิงก์ YouTube หรือเพลย์ลิสต์")
     async def play(self, interaction: discord.Interaction, query: str):

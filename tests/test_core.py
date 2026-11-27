@@ -4,12 +4,20 @@ import unittest
 from array import array
 from pathlib import Path
 
-from app.audio_mix import FRAME_BYTES, SILENCE, mix_pcm
+from app.audio_mix import FRAME_BYTES, SILENCE, diagnostic_tone_frame, mix_pcm
 from app import db
 from app.music_queue import MusicQueue
 
 
 class AudioMixTests(unittest.TestCase):
+    def test_local_diagnostic_tone_produces_stereo_audio(self):
+        frame = diagnostic_tone_frame(0)
+        self.assertEqual(len(frame), FRAME_BYTES)
+        self.assertNotEqual(frame, SILENCE)
+        samples = array("h")
+        samples.frombytes(frame)
+        self.assertEqual(samples[0::2], samples[1::2])
+
     def test_silence_frame(self):
         self.assertEqual(len(mix_pcm(SILENCE, SILENCE, 0.5)), FRAME_BYTES)
         self.assertEqual(mix_pcm(SILENCE, SILENCE, 0.5), SILENCE)

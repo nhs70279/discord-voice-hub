@@ -119,7 +119,19 @@ async def exchange_token(data: dict) -> dict:
 async def discord_api(path: str, access_token: str):
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(f"{OAUTH_API}{path}", headers={"Authorization": f"Bearer {access_token}"})
+            for attempt in range(2):
+                response = await client.get(f"{OAUTH_API}{path}", headers={"Authorization": f"Bearer {access_token}"})
+                if attempt == 0 and response.status_code in (429, 502, 503, 504):
+                    delay = 0.5
+                    if response.status_code == 429:
+                        try:
+                            delay = float(response.json().get("retry_after", 0.5))
+                        except (ValueError, TypeError, AttributeError):
+                            pass
+                    if 0 <= delay <= 3:
+                        await asyncio.sleep(delay)
+                        continue
+                break
     except httpx.RequestError as error:
         log.warning("Discord API connection failed for %s: %s", path, type(error).__name__)
         raise HTTPException(503, "ไม่สามารถเชื่อมต่อ Discord ได้ชั่วคราว กรุณาลองอีกครั้ง") from error
@@ -307,7 +319,7 @@ def web_voice_player(request: Request, guild_id: str, user_id: str):
 async def get_queue(request: Request, guild_id: str, guild=Depends(require_guild)):
     player = request.app.state.bot.guild_players.get(int(guild_id))
     if not player or not player.vc.is_connected():
-        return {"connected": False, "now_playing": None, "upcoming": [], "paused": False, "repeat": "off", "playback_status": "idle", "music_error": None}
+        return {"connected": False, "now_playing": None, "upcoming": [], "paused": False, "repeat": "off", "playback_status": "idle", "music_error": None, "tts_error": None}
     return {
         "connected": True,
         "now_playing": {"title": player.current.title, "requester": player.current.requester} if player.current else None,
@@ -316,6 +328,7 @@ async def get_queue(request: Request, guild_id: str, guild=Depends(require_guild
         "repeat": player.repeat_mode,
         "playback_status": player.playback_status,
         "music_error": player.last_music_error,
+        "tts_error": player.last_tts_error,
     }
 
 

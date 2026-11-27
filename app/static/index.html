@@ -127,7 +127,7 @@
       const q=await api(`/api/guilds/${guildId}/queue`);
       $('now-playing').textContent=q.connected?(q.now_playing?.title||'ยังไม่มีเพลงที่กำลังเล่น'):'ลิลินยังไม่ได้เข้าห้องเสียง';
       $('music-state').textContent=!q.connected?'พิมพ์ /join ใน Discord เพื่อเชื่อมต่อ':
-        q.music_error|| (q.playback_status==='loading'?'กำลังโหลดเสียงเพลงจาก YouTube…':
+        q.music_error|| (q.tts_error?`เสียงอ่านมีปัญหา (${q.tts_error}) กรุณาใช้ /diagnose ใน Discord`:'')|| (q.playback_status==='loading'?'กำลังโหลดเสียงเพลงจาก YouTube…':
         q.paused?'หยุดเพลงชั่วคราวอยู่':q.playback_status==='playing'?'กำลังส่งเสียงเข้าห้อง Discord':'พร้อมควบคุมเพลงแล้วค่ะ');
       $('queue-count').textContent=`รอเล่น ${q.upcoming.length} เพลง`;$('queue-repeat').value=q.repeat;
       $('queue-list').replaceChildren();
