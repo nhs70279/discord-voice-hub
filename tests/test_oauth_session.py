@@ -60,6 +60,22 @@ class OAuthSessionTests(unittest.IsolatedAsyncioTestCase):
                     await server.cached_discord_guilds("rate-limited-token")
             self.assertEqual(api.await_count, 2)
 
+    async def test_discord_429_exposes_retry_after_to_dashboard(self):
+        calls = 0
+
+        def rate_limited(request):
+            nonlocal calls
+            calls += 1
+            return httpx.Response(429, headers={"Retry-After": "45"}, request=request)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(rate_limited))
+        with patch.object(server.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(HTTPException) as raised:
+                await server.discord_api("/users/@me/guilds", "token")
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.headers["Retry-After"], "45")
+        self.assertEqual(calls, 1)
+
     async def test_temporary_discord_error_is_not_reported_as_expired_session(self):
         for status, expected in ((403, 403), (429, 503), (502, 503), (401, 401)):
             with self.subTest(status=status):
