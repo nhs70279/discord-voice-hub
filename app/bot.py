@@ -122,6 +122,9 @@ class VoiceHubBot(commands.Bot):
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
             return
+        received_at = asyncio.get_running_loop().time()
+        created_at = getattr(message, "created_at", None)
+        gateway_ms = max(0, round((datetime.now(timezone.utc) - created_at).total_seconds() * 1000)) if created_at else None
         player = self.guild_players.get(message.guild.id)
         if db.get_auto_join(message.guild.id):
             author_voice = getattr(getattr(message.author, "voice", None), "channel", None)
@@ -154,7 +157,8 @@ class VoiceHubBot(commands.Bot):
         self.last_message[key] = now
         spoken = speech_text(message.author.display_name[:32], message.content)
         if spoken:
-            if await player.add_speech(spoken, db.get_voice_config(message.author.id)):
+            if await player.add_speech(spoken, db.get_voice_config(message.author.id),
+                                       received_at=received_at, gateway_ms=gateway_ms):
                 player.chat_messages_enqueued += 1
 
     async def ensure_player(self, interaction: discord.Interaction) -> GuildPlayer:
@@ -292,6 +296,13 @@ class VoiceCommands(commands.Cog):
         dave_session = getattr(voice_state, "dave_session", None)
         dave_ready = bool(dave_session and getattr(dave_session, "ready", False))
         dave_protocol = getattr(voice_state, "dave_protocol_version", 0)
+        timing = player.last_tts_latency_ms
+        latency_summary = (
+            f"⏱️ หน่วงล่าสุด: Discord ~{timing['discord'] if timing['discord'] is not None else '?'} / "
+            f"คิว {timing['queue']} / สร้างเสียง {timing['synthesis']} / "
+            f"รอเริ่มเล่น {timing['playback_wait']} / รวม ~{timing['total']} มิลลิวินาที"
+            if timing else "⏱️ หน่วงเสียงอ่าน: ยังไม่มีตัวอย่าง ใช้ /testtts หรือพิมพ์แชตก่อน"
+        )
         lines = [
             f"🔎 discord.py: {discord.__version__} / davey: {dave_version}",
             f"🎙️ edge-tts: {edge_version}",
@@ -307,6 +318,9 @@ class VoiceCommands(commands.Cog):
             f"🎙️ คิวเสียงอ่าน: {player.tts_queue.qsize()} / ตัวสร้างเสียงทำงาน: {'ใช่' if not player.tts_task.done() else 'ไม่'}",
             f"⏭️ ข้อความเสียงที่ข้ามเพราะคิวล้นหรือรอนาน: {player.chat_messages_dropped}",
             f"🎙️ เครื่องสร้างเสียงล่าสุด: {player.last_tts_engine or 'ยังไม่ได้สร้างเสียง'}",
+            latency_summary,
+            f"📊 หน่วงเฉลี่ย: {round(sum(player.tts_latency_samples) / len(player.tts_latency_samples))} ms "
+            f"({len(player.tts_latency_samples)} ตัวอย่าง)" if player.tts_latency_samples else "📊 หน่วงเฉลี่ย: ยังไม่มีข้อมูล",
             f"🔐 DAVE เข้ารหัสพร้อม: {'ใช่' if dave_ready else 'ไม่'} (protocol {dave_protocol})",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
             f"📡 ส่งเสียง: {'กำลังส่ง' if player.vc.is_playing() else 'พักเพื่อลด CPU' if player.vc.is_paused() else 'ไม่ได้ส่ง'}",
