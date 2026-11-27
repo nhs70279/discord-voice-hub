@@ -221,6 +221,32 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(prepared.path.exists())
             self.player.tts_queue.task_done()
 
+    async def test_cancelling_inflight_download_cleans_file_after_network_finishes(self):
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        created_path = []
+
+        async def fake_synthesis(_message, _settings, path):
+            created_path.append(path)
+            started.set()
+            await finish.wait()
+            path.write_bytes(b"F" * 300)
+            return "Google Thai"
+
+        with patch.object(self.module, "synthesize_thai", side_effect=fake_synthesis):
+            self.player.tts_task.cancel()
+            await asyncio.gather(self.player.tts_task, return_exceptions=True)
+            await self.player.add_speech("discard after download", {})
+            request = self.player.tts_queue.get_nowait()
+            await asyncio.wait_for(started.wait(), timeout=1)
+            self.player._discard_preparation(request.preparation)
+            finish.set()
+            await asyncio.gather(request.preparation, return_exceptions=True)
+            self.player.tts_queue.task_done()
+
+        self.assertTrue(request.preparation.cancelled())
+        self.assertFalse(created_path[0].exists())
+
     async def test_youtube_stream_without_frames_recovers_with_local_audio(self):
         local_source = FakeAudioSource([bytes([7]) * FRAME_BYTES])
         with patch.object(self.module, "music_audio_source", return_value=(FakeAudioSource([]), None)), \
