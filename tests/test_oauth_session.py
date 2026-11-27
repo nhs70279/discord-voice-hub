@@ -1,10 +1,12 @@
 """Discord errors and OAuth token refresh must not produce false expiry alerts."""
 
+import asyncio
 import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -21,6 +23,43 @@ except ModuleNotFoundError as error:
 
 
 class OAuthSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        server._guild_cache.clear()
+
+    async def test_dashboard_reuses_guild_membership_across_parallel_requests(self):
+        guild = {"id": "123", "name": "My server", "permissions": "32"}
+        bot = SimpleNamespace(guilds=[SimpleNamespace(id=123)])
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(bot=bot)))
+        api = AsyncMock(return_value=[guild])
+        with patch.object(server, "discord_api", new=api):
+            results = await asyncio.gather(*(
+                server.user_guilds(request, session={"access_token": "token-A"})
+                for _ in range(8)
+            ))
+            self.assertEqual(results, [[guild]] * 8)
+            self.assertEqual(api.await_count, 1)
+            # Live bot membership is checked on every request, even on a cache hit.
+            bot.guilds = []
+            self.assertEqual(await server.user_guilds(request, session={"access_token": "token-A"}), [])
+            self.assertEqual(api.await_count, 1)
+
+    async def test_dashboard_does_not_reuse_guild_cache_after_token_rotation(self):
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+            bot=SimpleNamespace(guilds=[SimpleNamespace(id=123)]))))
+        api = AsyncMock(return_value=[{"id": "123", "permissions": "32"}])
+        with patch.object(server, "discord_api", new=api):
+            await server.user_guilds(request, session={"access_token": "old-token"})
+            await server.user_guilds(request, session={"access_token": "new-token"})
+            self.assertEqual(api.await_count, 2)
+
+    async def test_failed_guild_lookup_is_not_cached(self):
+        api = AsyncMock(side_effect=HTTPException(503, "Discord rate limited"))
+        with patch.object(server, "discord_api", new=api):
+            for _ in range(2):
+                with self.assertRaises(HTTPException):
+                    await server.cached_discord_guilds("rate-limited-token")
+            self.assertEqual(api.await_count, 2)
+
     async def test_temporary_discord_error_is_not_reported_as_expired_session(self):
         for status, expected in ((403, 403), (429, 503), (502, 503), (401, 401)):
             with self.subTest(status=status):
