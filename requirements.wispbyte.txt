@@ -3,4 +3,6 @@
 
 # Bundles a usable FFmpeg executable when the shared Python image lacks apt FFmpeg.
 # Wispbyte's free egg does not grant root for apt-get.
-imageio-ffmpeg>=0.6,<1
+# The paid Wispbyte Python image already has 0.8.1. Updating to 0.8.2
+# re-downloads a 68 MB FFmpeg wheel and can exhaust its small pip temp volume.
+imageio-ffmpeg==0.8.1
