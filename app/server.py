@@ -475,7 +475,7 @@ async def play_playlist(request: Request, guild_id: str, playlist_id: int, sessi
 
 @app.get("/api/guilds/{guild_id}/settings")
 async def guild_settings(guild_id: str, guild=Depends(require_guild)):
-    return {"read_channel_id": db.get_read_channel(guild_id)}
+    return {"read_scope": "all", "auto_join_enabled": db.get_auto_join(guild_id)}
 
 
 @app.get("/api/guilds/{guild_id}/channels")
@@ -486,19 +486,19 @@ async def guild_channels(request: Request, guild_id: str, guild=Depends(require_
     return [{"id": str(c.id), "name": c.name} for c in bot_guild.text_channels]
 
 
-class ChannelSetting(BaseModel):
-    channel_id: str
+class GuildSetting(BaseModel):
+    auto_join_enabled: bool
 
 
 @app.put("/api/guilds/{guild_id}/settings")
-async def update_guild_settings(request: Request, guild_id: str, data: ChannelSetting, guild=Depends(require_guild)):
+async def update_guild_settings(request: Request, guild_id: str, data: GuildSetting, guild=Depends(require_guild)):
     if not (int(guild["permissions"]) & 0x28):
         raise HTTPException(403, "ต้องมีสิทธิ์จัดการเซิร์ฟเวอร์ค่ะ")
-    bot_guild = request.app.state.bot.get_guild(int(guild_id))
-    channel = bot_guild.get_channel(int(data.channel_id)) if bot_guild and data.channel_id.isdigit() else None
-    if not isinstance(channel, discord.TextChannel):
-        raise HTTPException(400, "กรุณาเลือกช่องข้อความที่ถูกต้อง")
-    db.set_read_channel(guild_id, channel.id)
+    db.set_auto_join(guild_id, data.auto_join_enabled)
+    if data.auto_join_enabled:
+        bot_guild = request.app.state.bot.get_guild(int(guild_id))
+        if bot_guild:
+            request.app.state.bot.schedule_auto_join(bot_guild)
     return {"ok": True}
 
 
