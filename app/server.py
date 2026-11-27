@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+import math
 import os
 import secrets
 import time
@@ -125,6 +126,7 @@ async def exchange_token(data: dict) -> dict:
 
 
 async def discord_api(path: str, access_token: str):
+    retry_after = 0.5
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             for attempt in range(2):
@@ -133,9 +135,10 @@ async def discord_api(path: str, access_token: str):
                     delay = 0.5
                     if response.status_code == 429:
                         try:
-                            delay = float(response.json().get("retry_after", 0.5))
+                            delay = float(response.headers.get("Retry-After") or response.json().get("retry_after", 0.5))
                         except (ValueError, TypeError, AttributeError):
                             pass
+                        retry_after = delay
                     if 0 <= delay <= 3:
                         await asyncio.sleep(delay)
                         continue
@@ -150,7 +153,12 @@ async def discord_api(path: str, access_token: str):
     if response.status_code >= 400:
         log.warning("Discord API %s returned HTTP %s", path, response.status_code)
         if response.status_code == 429:
-            raise HTTPException(503, "Discord จำกัดจำนวนคำขอชั่วคราว (HTTP 429) กรุณารอสักครู่แล้วลองอีกครั้ง")
+            try:
+                retry_after = float(response.headers.get("Retry-After") or response.json().get("retry_after", retry_after))
+            except (ValueError, TypeError, AttributeError):
+                pass
+            wait_seconds = math.ceil(retry_after) if math.isfinite(retry_after) and retry_after > 0 else 30
+            raise HTTPException(503, "Discord จำกัดจำนวนคำขอชั่วคราว (HTTP 429) กรุณารอสักครู่แล้วลองอีกครั้ง", headers={"Retry-After": str(min(wait_seconds, 3600))})
         raise HTTPException(503, f"Discord ไม่พร้อมให้บริการชั่วคราว (HTTP {response.status_code}) กรุณาลองอีกครั้ง")
     return response.json()
 
