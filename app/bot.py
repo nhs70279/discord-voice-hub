@@ -274,7 +274,7 @@ class VoiceCommands(commands.Cog):
             f"🎙️ เครื่องสร้างเสียงล่าสุด: {player.last_tts_engine or 'ยังไม่ได้สร้างเสียง'}",
             f"🔐 DAVE เข้ารหัสพร้อม: {'ใช่' if dave_ready else 'ไม่'} (protocol {dave_protocol})",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
-            f"📡 ส่งเสียง: {'ใช่' if player.vc.is_playing() else 'ไม่'}",
+            f"📡 ส่งเสียง: {'กำลังส่ง' if player.vc.is_playing() else 'พักเพื่อลด CPU' if player.vc.is_paused() else 'ไม่ได้ส่ง'}",
             f"📦 เฟรมเสียงที่สร้าง: เพลง {player.mixer.music_frames_sent} / เสียงอ่านและทดสอบ {player.mixer.speech_frames_sent}",
             f"⚠️ ส่งเสียงผิดพลาด: {player.last_transport_error or 'ไม่มี'}",
             f"🎵 เพลง: {player.playback_status}",
@@ -331,7 +331,7 @@ class VoiceCommands(commands.Cog):
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
-        player.mixer.paused = True
+        player.pause_music()
         await interaction.response.send_message("⏸️ ลิลินพักเพลงไว้ก่อนนะคะ", ephemeral=True)
 
     @app_commands.command(name="resume", description="เล่นเพลงต่อ")
@@ -340,7 +340,7 @@ class VoiceCommands(commands.Cog):
             player = self.bot.player_for_command(interaction)
         except ValueError as error:
             return await interaction.response.send_message(str(error), ephemeral=True)
-        player.mixer.paused = False
+        player.resume_music()
         await interaction.response.send_message("▶️ เล่นเพลงต่อแล้วค่ะ", ephemeral=True)
 
     @app_commands.command(name="queue", description="ดูเพลงที่กำลังเล่นและคิวเพลงถัดไป")
