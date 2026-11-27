@@ -1,0 +1,273 @@
+"""Voice mixing, FIFO TTS, and a separate music playback queue."""
+
+import asyncio
+import logging
+import os
+import re
+import tempfile
+import threading
+from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
+
+import discord
+import edge_tts
+import yt_dlp
+
+from .audio_mix import FRAME_BYTES, SILENCE, mix_pcm, normalize
+from .music_queue import MusicQueue
+
+log = logging.getLogger(__name__)
+YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
+
+
+def valid_query(query: str) -> bool:
+    query = query.strip()
+    if not 1 <= len(query) <= 400:
+        return False
+    parsed = urlparse(query)
+    if parsed.scheme or parsed.netloc:
+        return parsed.scheme == "https" and parsed.hostname in YOUTUBE_HOSTS
+    return True  # Keywords are searched on YouTube
+
+
+def discover_tracks(query: str) -> list[dict]:
+    """Resolve keywords, individual YouTube links, or a YouTube playlist (30 max)."""
+    if not valid_query(query):
+        raise ValueError("YouTube URL（https）または曲名を入力してください。")
+    settings = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "playlistend": 30,
+        "default_search": "ytsearch1",
+        "ignoreerrors": True,
+        "noplaylist": False,
+    }
+    with yt_dlp.YoutubeDL(settings) as downloader:
+        data = downloader.extract_info(query, download=False)
+    if not data:
+        return []
+    raw = list(data.get("entries") or [data])
+    result = []
+    for item in raw[:30]:
+        if not item:
+            continue
+        item_id = item.get("id")
+        url = item.get("webpage_url") or item.get("url")
+        if not url or not url.startswith("https://") or not valid_query(url):
+            url = f"https://www.youtube.com/watch?v={item_id}" if item_id else None
+        if url and valid_query(url):
+            result.append({"title": item.get("title") or "Unknown", "url": url})
+    return result
+
+
+def music_audio_source(url: str) -> discord.AudioSource:
+    """Acquire an ephemeral stream URL just before playback; never download media."""
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "format": "bestaudio/best", "noplaylist": True}) as downloader:
+        info = downloader.extract_info(url, download=False)
+    if not info or not info.get("url"):
+        raise RuntimeError("Audio stream not found")
+    return discord.FFmpegPCMAudio(
+        info["url"],
+        before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+        options="-vn",
+    )
+
+
+class Mixer(discord.AudioSource):
+    """Persistent PCM source; ducks music only while speech is audible."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, on_music_end):
+        self.loop = loop
+        self.on_music_end = on_music_end
+        self._lock = threading.RLock()
+        self.music: discord.AudioSource | None = None
+        self.speech: deque[tuple[discord.AudioSource, Path]] = deque()
+        self.music_volume = 0.75
+        self.tts_volume = 1.0
+        self.duck_fraction = 0.28
+        self.paused = False
+        self.closed = False
+
+    def is_opus(self):
+        return False
+
+    def set_music(self, source: discord.AudioSource):
+        with self._lock:
+            if self.closed:
+                source.cleanup()
+                return
+            self._stop_music_locked()
+            self.music = source
+            self.paused = False
+
+    def skip(self):
+        with self._lock:
+            self._stop_music_locked()
+            self.loop.call_soon_threadsafe(self.on_music_end)
+
+    def _stop_music_locked(self):
+        if self.music:
+            self.music.cleanup()
+            self.music = None
+
+    def enqueue_speech(self, source: discord.AudioSource, path: Path):
+        with self._lock:
+            if self.closed:
+                source.cleanup()
+                path.unlink(missing_ok=True)
+            else:
+                self.speech.append((source, path))
+
+    def read(self) -> bytes:
+        with self._lock:
+            if self.closed:
+                return b""
+            music = SILENCE
+            speech = SILENCE
+            if self.music and not self.paused:
+                try:
+                    frame = self.music.read()
+                except Exception:
+                    log.exception("Music decoding failed")
+                    frame = b""
+                if frame:
+                    music = normalize(frame)
+                else:
+                    self._stop_music_locked()
+                    self.loop.call_soon_threadsafe(self.on_music_end)
+            while self.speech:
+                source, path = self.speech[0]
+                try:
+                    frame = source.read()
+                except Exception:
+                    log.exception("Speech decoding failed")
+                    frame = b""
+                if frame:
+                    speech = normalize(frame)
+                    break
+                source.cleanup()
+                path.unlink(missing_ok=True)
+                self.speech.popleft()
+            if speech != SILENCE:
+                return mix_pcm(music, speech, self.music_volume * self.duck_fraction, self.tts_volume)
+            if music != SILENCE:
+                return mix_pcm(music, SILENCE, self.music_volume, 0)
+            return SILENCE
+
+    def cleanup(self):
+        with self._lock:
+            self.closed = True
+            self._stop_music_locked()
+            while self.speech:
+                source, path = self.speech.popleft()
+                source.cleanup()
+                path.unlink(missing_ok=True)
+
+
+@dataclass
+class Track:
+    title: str
+    url: str
+    requester: str
+
+
+class GuildPlayer:
+    def __init__(self, vc: discord.VoiceClient, loop: asyncio.AbstractEventLoop):
+        self.vc = vc
+        self.loop = loop
+        self.music_queue: MusicQueue[Track] = MusicQueue(max_size=150)
+        self.tts_queue: asyncio.Queue[tuple[str, dict]] = asyncio.Queue(maxsize=40)
+        self.music_done = asyncio.Event()
+        self._music_generation = 0
+        self.repeat_mode = "off"
+        self.current: Track | None = None
+        self.mixer = Mixer(loop, self.music_done.set)
+        self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
+        self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
+        self.vc.play(self.mixer)
+
+    def add_tracks(self, tracks: list[Track], *, front: bool = False, now: bool = False):
+        self.music_queue.add_many(tracks, front=front)
+        if now:
+            self.skip()
+
+    async def _music_worker(self):
+        while True:
+            track = await self.music_queue.get()
+            self.current = track
+            generation = self._music_generation
+            try:
+                source = await asyncio.to_thread(music_audio_source, track.url)
+                if generation != self._music_generation:
+                    source.cleanup()
+                    continue
+                self.music_done.clear()
+                self.mixer.set_music(source)
+                await self.music_done.wait()
+                if generation == self._music_generation and self.repeat_mode in {"one", "all"}:
+                    self.music_queue.add_many([track], front=self.repeat_mode == "one")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Could not play track: %s", track.title)
+            finally:
+                self.current = None
+
+    async def _tts_worker(self):
+        while True:
+            message, settings = await self.tts_queue.get()
+            path: Path | None = None
+            try:
+                fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
+                os.close(fd)
+                path = Path(filename)
+                await edge_tts.Communicate(
+                    text=message,
+                    voice=settings["voice"],
+                    rate=f'{settings["rate"]:+d}%',
+                    pitch=f'{settings["pitch"]:+d}Hz',
+                ).save(str(path))
+                source = discord.FFmpegPCMAudio(str(path), options="-vn")
+                self.mixer.enqueue_speech(source, path)
+                path = None  # Mixer now owns this file
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("TTS failed")
+            finally:
+                if path:
+                    path.unlink(missing_ok=True)
+                self.tts_queue.task_done()
+
+    async def add_speech(self, message: str, settings: dict):
+        if not self.tts_queue.full():
+            self.tts_queue.put_nowait((message, settings))
+
+    def skip(self):
+        self._music_generation += 1
+        self.mixer.skip()
+
+    def stop_music(self):
+        self.music_queue.clear()
+        self.skip()
+
+    async def shutdown(self):
+        self.music_task.cancel()
+        self.tts_task.cancel()
+        await asyncio.gather(self.music_task, self.tts_task, return_exceptions=True)
+        self.vc.stop()
+        self.mixer.cleanup()
+        if self.vc.is_connected():
+            await self.vc.disconnect(force=True)
+
+
+def speech_text(author: str, content: str) -> str:
+    """Avoid reading URL noise, mentions, markdown, and very long messages."""
+    content = re.sub(r"https?://\S+", "リンク", content)
+    content = re.sub(r"<[@#][!&]?\d+>", "", content)
+    content = re.sub(r"[`*_~|]", "", content)
+    content = " ".join(content.split())[:180]
+    return f"{author}さん、{content}" if content else ""
