@@ -21,6 +21,8 @@ class FlyConfigurationTests(unittest.TestCase):
 
     def test_machine_is_always_on_and_single_process(self):
         self.assertEqual(self.config["http_service"]["auto_stop_machines"], "off")
+        self.assertTrue(self.config["http_service"]["auto_start_machines"])
+        self.assertEqual(self.config["restart"][0]["policy"], "always")
         self.assertEqual(self.config["http_service"]["internal_port"], 8080)
         self.assertEqual(self.config["vm"][0]["size"], "shared-cpu-1x")
         self.assertEqual(self.config["vm"][0]["memory"], "512mb")
