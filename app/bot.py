@@ -169,7 +169,7 @@ class VoiceHubBot(commands.Bot):
         if not player:
             raise ValueError("พิมพ์ /join เพื่อให้ลิลินเข้าห้องเสียงก่อนค่ะ")
         if not valid_query(query):
-            raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
+            raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube หรือ SoundCloud แบบ HTTPS")
         tracks = await asyncio.to_thread(discover_tracks, query)
         if not tracks:
             raise ValueError("ลิลินหาเพลงนี้ไม่เจอค่ะ")
@@ -278,6 +278,7 @@ class VoiceCommands(commands.Cog):
             f"📦 เฟรมเสียงที่สร้าง: เพลง {player.mixer.music_frames_sent} / เสียงอ่านและทดสอบ {player.mixer.speech_frames_sent}",
             f"⚠️ ส่งเสียงผิดพลาด: {player.last_transport_error or 'ไม่มี'}",
             f"🎵 เพลง: {player.playback_status}",
+            f"🔁 เพลงจาก SoundCloud สำรอง: {player.last_music_fallback or 'ไม่ได้ใช้'}",
             f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
             f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",
         ]
@@ -285,13 +286,13 @@ class VoiceCommands(commands.Cog):
             lines.append("⚠️ davey 0.2.x ยังไม่รองรับ discord.py 2.7.1 กรุณาใช้ davey 0.1.6")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อหรือลิงก์ YouTube หรือเพลย์ลิสต์")
+    @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อ ลิงก์ YouTube หรือ SoundCloud หรือเพลย์ลิสต์")
     async def play(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer(ephemeral=True)
         try:
             await self.bot.ensure_player(interaction)
             count = await self.bot.enqueue_query(interaction.guild_id, query, str(interaction.user.id))
-            await interaction.followup.send(f"🎵 ลิลินเพิ่มเพลงให้แล้ว {count} เพลงค่ะ", ephemeral=True)
+            await interaction.followup.send(f"🎵 รับเพลงเข้าคิวแล้ว {count} เพลงค่ะ กำลังตรวจสอบแหล่งเสียงก่อนเล่นนะคะ", ephemeral=True)
         except Exception as error:
             log.warning("Play failed: %s", error)
             await interaction.followup.send(f"ขอโทษค่ะ เล่นเพลงไม่ได้: {error}", ephemeral=True)
@@ -353,6 +354,10 @@ class VoiceCommands(commands.Cog):
         names += [f"{idx}. {t.title}" for idx, t in enumerate(pending[:20], start=1)]
         if len(pending) > 20:
             names.append(f"…เหลืออีก {len(pending) - 20} เพลง")
+        if player.last_music_fallback and player.current:
+            names.append(f"🔁 ใช้เสียงสำรองจาก SoundCloud: {player.last_music_fallback}")
+        if player.last_music_error:
+            names.append(f"⚠️ เพลงล่าสุดมีปัญหา: {player.last_music_error}")
         if not pending:
             names.append("คิวเพลงว่างอยู่ค่ะ")
         await interaction.response.send_message("\n".join(names), ephemeral=True)
