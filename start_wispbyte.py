@@ -8,9 +8,11 @@ import hashlib
 import logging
 import os
 import shutil
+import socket
 import stat
 import subprocess
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -164,6 +166,58 @@ def start_cloudflare_tunnel(executable: Path | None) -> subprocess.Popen | None:
     return process
 
 
+def start_youtube_pot_provider() -> subprocess.Popen | None:
+    """Optionally start an installed PO token server on localhost only.
+
+    Startup never downloads or builds a JS project on the bot's small server.
+    A missing/broken provider leaves the normal Safari YouTube path intact.
+    """
+    os.environ.pop("YOUTUBE_POT_READY", None)
+    home = os.getenv("YOUTUBE_POT_SERVER_HOME", "").strip()
+    if not home:
+        return None
+    configured = Path(home).expanduser()
+    server = (configured if configured.is_absolute() else ROOT / configured).resolve()
+    modules = server / "node_modules"
+    main_file = server / "src" / "main.ts"
+    deno = shutil.which("deno")
+    if not deno or not modules.is_dir() or not main_file.is_file():
+        log.warning("YouTube PO provider not installed; keeping Safari fallback")
+        return None
+
+    # The third-party provider needs network and JS permissions but does not
+    # need the Discord token, OAuth secret, or browser cookies in its env.
+    allowed_env = ("PATH", "HOME", "DENO_DIR", "TMPDIR", "NO_COLOR")
+    environment = {key: os.environ[key] for key in allowed_env if key in os.environ}
+    try:
+        process = subprocess.Popen(
+            [deno, "run", "--allow-env", "--allow-net", "--allow-ffi=.",
+             "--allow-read=.", "../src/main.ts", "--host", "127.0.0.1", "--port", "4416"],
+            cwd=str(modules), env=environment, stdin=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        log.warning("YouTube PO provider could not start: %s", type(exc).__name__)
+        return None
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline and process.poll() is None:
+        try:
+            with socket.create_connection(("127.0.0.1", 4416), timeout=0.15):
+                os.environ["YOUTUBE_POT_READY"] = "1"
+                log.info("YouTube PO token provider ready on localhost")
+                return process
+        except OSError:
+            time.sleep(0.15)
+    log.warning("YouTube PO provider did not become ready; using Safari fallback")
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+    return None
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     from dotenv import load_dotenv
@@ -172,6 +226,8 @@ def main() -> None:
     configure_storage()
     configure_ffmpeg()
     configure_deno()
+
+    pot_provider = start_youtube_pot_provider()
 
     tunnel = start_cloudflare_tunnel(configure_cloudflared())
 
@@ -182,6 +238,14 @@ def main() -> None:
     try:
         uvicorn.run("app.server:app", host="0.0.0.0", port=port, workers=1, loop="asyncio", http="h11")
     finally:
+        os.environ.pop("YOUTUBE_POT_READY", None)
+        if pot_provider is not None and pot_provider.poll() is None:
+            pot_provider.terminate()
+            try:
+                pot_provider.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pot_provider.kill()
+                pot_provider.wait(timeout=3)
         if tunnel is not None and tunnel.poll() is None:
             tunnel.terminate()
             try:
