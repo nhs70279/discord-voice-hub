@@ -11,7 +11,6 @@ import shutil
 import socket
 import stat
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.request
@@ -223,36 +222,6 @@ def start_youtube_pot_provider() -> subprocess.Popen | None:
     return None
 
 
-def start_youtube_smoke_probe() -> subprocess.Popen | None:
-    """Run a single safe YouTube media probe when explicitly requested.
-
-    Keep it out of the main process and never hold up Discord's startup.
-    Renaming the marker prevents repeated YouTube requests on each restart.
-    """
-    marker = DATA / "youtube-probe.requested"
-    if not marker.is_file():
-        return None
-    try:
-        marker.rename(DATA / "youtube-probe.started")
-    except OSError as error:
-        log.warning("Could not mark YouTube probe as started: %s", type(error).__name__)
-        return None
-    if os.environ.get("YOUTUBE_POT_READY") != "1":
-        log.warning("YouTube probe requested but local PO token provider is not ready")
-        return None
-
-    allowed = ("PATH", "HOME", "PYTHONPATH", "YOUTUBE_POT_READY", "TMPDIR")
-    environment = {key: os.environ[key] for key in allowed if key in os.environ}
-    try:
-        return subprocess.Popen(
-            [sys.executable, "-u", "-m", "scripts.probe_youtube"],
-            cwd=str(ROOT), env=environment, stdin=subprocess.DEVNULL,
-        )
-    except OSError as error:
-        log.warning("Could not launch one-time YouTube probe: %s", type(error).__name__)
-        return None
-
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     from dotenv import load_dotenv
@@ -264,8 +233,6 @@ def main() -> None:
 
     pot_provider = start_youtube_pot_provider()
 
-    youtube_probe = start_youtube_smoke_probe()
-
     tunnel = start_cloudflare_tunnel(configure_cloudflared())
 
     import uvicorn
@@ -275,13 +242,6 @@ def main() -> None:
     try:
         uvicorn.run("app.server:app", host="0.0.0.0", port=port, workers=1, loop="asyncio", http="h11")
     finally:
-        if youtube_probe is not None and youtube_probe.poll() is None:
-            youtube_probe.terminate()
-            try:
-                youtube_probe.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                youtube_probe.kill()
-                youtube_probe.wait(timeout=2)
         os.environ.pop("YOUTUBE_POT_READY", None)
         if pot_provider is not None and pot_provider.poll() is None:
             pot_provider.terminate()
