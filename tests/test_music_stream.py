@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 try:
+    import app.player as player_module
     from app.player import (MusicSourceUnavailable, discover_tracks, downloaded_youtube_source,
                             music_audio_source, valid_query)
     from yt_dlp.utils import DownloadError
@@ -17,6 +18,16 @@ except ImportError:  # Skip in a Python environment without the optional voice d
 
 @unittest.skipIf(music_audio_source is None, "Discord voice dependencies are unavailable")
 class MusicStreamTests(unittest.TestCase):
+    def setUp(self):
+        # Bot challenges are shared between guilds in production, but tests
+        # should not inherit each other's temporary cooldown.
+        old_until = player_module._youtube_challenge_until
+        player_module._youtube_challenge_until = 0.0
+        self.addCleanup(setattr, player_module, "_youtube_challenge_until", old_until)
+        env_patch = patch.dict(os.environ, {"YOUTUBE_PROXY_URL": ""})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_passes_youtube_http_headers_to_ffmpeg(self, youtube_dl, ffmpeg):
@@ -77,7 +88,7 @@ class MusicStreamTests(unittest.TestCase):
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_prefers_alternate_youtube_clients_before_soundcloud(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
-            DownloadError("Sign in to confirm you're not a bot"),
+            DownloadError("HTTP Error 403: Forbidden"),
             {"url": "https://youtube-stream.example.invalid/audio", "http_headers": {}},
         ]
         source, fallback_title = music_audio_source(
@@ -105,8 +116,8 @@ class MusicStreamTests(unittest.TestCase):
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_tries_youtube_clients_separately_when_one_is_blocked(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
-            DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("HTTP Error 403: Forbidden"),
+            DownloadError("Requested format is not available"),
             {"url": "https://youtube-stream.example.invalid/audio"},
         ]
         source, fallback = music_audio_source("https://www.youtube.com/watch?v=abc", "Artist - Song")
@@ -120,8 +131,6 @@ class MusicStreamTests(unittest.TestCase):
     def test_youtube_signin_error_uses_close_soundcloud_match(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
             DownloadError("Sign in to confirm you're not a bot"),
-            DownloadError("Sign in to confirm you're not a bot"),
-            DownloadError("Sign in to confirm you're not a bot"),
             {"entries": [
                 {"title": "Unrelated artist", "webpage_url": "https://soundcloud.com/a/wrong"},
                 {"title": "Ed Sheeran - Shape of You", "webpage_url": "https://soundcloud.com/ed/shape-of-you"},
@@ -134,13 +143,13 @@ class MusicStreamTests(unittest.TestCase):
         self.assertIs(source, ffmpeg.return_value)
         self.assertEqual(fallback_title, "Ed Sheeran - Shape of You")
         self.assertEqual(ffmpeg.call_args.args, ("https://stream.example.invalid/song",))
+        self.assertEqual(youtube_dl.call_count, 3)
+        self.assertGreater(player_module.youtube_challenge_cooldown_seconds(), 500)
 
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_does_not_play_unrelated_or_remixed_soundcloud_results(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
-            DownloadError("Sign in to confirm you're not a bot"),
-            DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
             {"entries": [
                 {"title": "Something else", "webpage_url": "https://soundcloud.com/a/wrong"},
@@ -150,6 +159,55 @@ class MusicStreamTests(unittest.TestCase):
         with self.assertRaisesRegex(MusicSourceUnavailable, "YouTube"):
             music_audio_source("https://www.youtube.com/watch?v=abc", "Shape of You - Ed Sheeran")
         ffmpeg.assert_not_called()
+        self.assertEqual(youtube_dl.call_count, 2)
+
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_login_challenge_halts_youtube_requests_until_cooldown(self, youtube_dl):
+        youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
+            DownloadError("Sign in to confirm you're not a bot"),
+            {"entries": []}, {"entries": []},
+        ]
+        with self.assertRaisesRegex(MusicSourceUnavailable, "ยืนยันว่าไม่ใช่บอท"):
+            music_audio_source("https://www.youtube.com/watch?v=abc", "Artist Song")
+        self.assertEqual(youtube_dl.call_count, 2)  # YouTube + one SoundCloud search
+        with self.assertRaisesRegex(MusicSourceUnavailable, "ยืนยันว่าไม่ใช่บอท"):
+            music_audio_source("https://www.youtube.com/watch?v=abc", "Artist Song")
+        self.assertEqual(youtube_dl.call_count, 3)  # SoundCloud only, no more YouTube
+
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_discovery_reports_bot_challenge_instead_of_missing_song(self, youtube_dl):
+        youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = DownloadError(
+            "Sign in to confirm you're not a bot"
+        )
+        with self.assertRaisesRegex(MusicSourceUnavailable, "ยืนยันว่าไม่ใช่บอท"):
+            discover_tracks("https://www.youtube.com/watch?v=abc")
+        self.assertEqual(youtube_dl.call_count, 1)
+        self.assertFalse(youtube_dl.call_args.args[0]["ignoreerrors"])
+
+    @patch("app.player.discord.FFmpegPCMAudio")
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_proxy_uses_ytdlp_for_both_discovery_and_media_bytes(self, youtube_dl, ffmpeg):
+        with patch.dict(os.environ, {"YOUTUBE_PROXY_URL": "socks5://127.0.0.1:1080"}):
+            youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {
+                "entries": [{"title": "Artist Song", "webpage_url": "https://www.youtube.com/watch?v=abc"}]
+            }
+            discover_tracks("Artist Song")
+            self.assertEqual(youtube_dl.call_args.args[0]["proxy"], "socks5://127.0.0.1:1080")
+
+            def write_audio(url, download):
+                self.assertTrue(download)
+                options = youtube_dl.call_args.args[0]
+                self.assertEqual(options["proxy"], "socks5://127.0.0.1:1080")
+                Path(options["outtmpl"].replace("%(ext)s", "webm")).write_bytes(b"audio")
+                return {"url": url}
+
+            ctx = youtube_dl.return_value.__enter__.return_value
+            ctx.extract_info.side_effect = write_audio
+            ctx.prepare_filename.side_effect = lambda info: youtube_dl.call_args.args[0]["outtmpl"].replace("%(ext)s", "webm")
+            source, fallback = music_audio_source("https://www.youtube.com/watch?v=abc", "Artist Song")
+            self.assertIsNone(fallback)
+            self.assertTrue(Path(ffmpeg.call_args.args[0]).exists())
+            source.cleanup()
 
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_other_youtube_errors_are_not_silently_replaced(self, youtube_dl):

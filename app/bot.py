@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import db
-from .player import GuildPlayer, Track, discover_tracks, speech_text, valid_query
+from .player import GuildPlayer, Track, discover_tracks, speech_text, valid_query, youtube_challenge_cooldown_seconds
 from .voice_policy import occupied_channel, visible_to_voice_listeners
 
 log = logging.getLogger(__name__)
@@ -278,6 +278,8 @@ class VoiceCommands(commands.Cog):
             f"🎙️ edge-tts: {edge_version}",
             f"🎵 YouTube extractor: {youtube_version} / EJS: {ejs_version} / Deno: {'พร้อม' if shutil.which('deno') else 'ไม่พบ'}",
             f"🔑 YouTube Cookies: {'ตั้งค่าพาธแล้ว' if os.getenv('YOUTUBE_COOKIES_PATH') else 'ไม่ได้ตั้งค่า'}",
+            f"🌐 YouTube เส้นทางเครือข่ายอื่น: {'ตั้งค่าแล้ว' if os.getenv('YOUTUBE_PROXY_URL') else 'ไม่ได้ตั้งค่า'}",
+            f"🛑 YouTube รอหลังถูกขอยืนยันตัวตน: {youtube_challenge_cooldown_seconds()} วินาที",
             "📝 ช่องแชตที่อ่าน: ทุกช่อง รวมถึงแชตในห้องเสียง",
             f"🚪 เข้าห้องเสียงอัตโนมัติ: {'เปิด' if db.get_auto_join(interaction.guild_id) else 'ปิด'}",
             f"📨 แชตที่ได้รับ: {player.chat_events_seen} / มีข้อความ: {player.chat_events_in_read_channel} / เข้าคิวเสียง: {player.chat_messages_enqueued}",
