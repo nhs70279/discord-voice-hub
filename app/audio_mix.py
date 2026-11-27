@@ -11,7 +11,7 @@ def diagnostic_tone_frame(start_sample: int, *, frequency: int = 440) -> bytes:
     """One 20ms stereo PCM frame of an original test tone, with no network I/O."""
     pcm = array("h")
     for sample_index in range(FRAME_BYTES // 4):
-        sample = round(9500 * sin(2 * pi * frequency * (start_sample + sample_index) / 48000))
+        sample = round(17500 * sin(2 * pi * frequency * (start_sample + sample_index) / 48000))
         pcm.extend((sample, sample))
     return pcm.tobytes()
 

@@ -133,11 +133,11 @@ class VoiceCommands(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         try:
             player = await self.bot.ensure_player(interaction)
-            player.play_test_tone()
             await interaction.followup.send(
-                "🔊 ลิลินกำลังเล่นเสียงทดสอบสั้น ๆ ค่ะ หากไม่ได้ยิน ให้ตรวจสอบเสียงใน Discord หรือใช้ /diagnose",
+                "🔊 ลิลินจะเล่นเสียงทดสอบ 4 วินาทีตอนนี้ค่ะ หากไม่ได้ยิน ให้ตรวจสอบเสียงใน Discord หรือใช้ /diagnose",
                 ephemeral=True,
             )
+            player.play_test_tone()
         except Exception as error:
             log.warning("Voice test failed: %s", error)
             await interaction.followup.send(f"ทดสอบเสียงไม่สำเร็จ: {error}", ephemeral=True)
@@ -152,6 +152,8 @@ class VoiceCommands(commands.Cog):
             f"🔎 discord.py: {discord.__version__} / DAVE: {dave}",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
             f"📡 ส่งเสียง: {'ใช่' if player.vc.is_playing() else 'ไม่'}",
+            f"📦 เฟรมเสียงที่สร้าง: เพลง {player.mixer.music_frames_sent} / เสียงอ่านและทดสอบ {player.mixer.speech_frames_sent}",
+            f"⚠️ ส่งเสียงผิดพลาด: {player.last_transport_error or 'ไม่มี'}",
             f"🎵 เพลง: {player.playback_status}",
             f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
             f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",

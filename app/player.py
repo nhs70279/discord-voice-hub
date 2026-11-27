@@ -94,7 +94,7 @@ def music_audio_source(url: str) -> discord.AudioSource:
 class DiagnosticTone(discord.AudioSource):
     """A short local beep to test Discord audio independently of TTS and YouTube."""
 
-    def __init__(self, duration_seconds: float = 1.4):
+    def __init__(self, duration_seconds: float = 4.0):
         self.frames_remaining = int(duration_seconds * 50)
         self.next_sample = 0
 
@@ -120,6 +120,8 @@ class Mixer(discord.AudioSource):
         self._lock = threading.RLock()
         self.music: discord.AudioSource | None = None
         self.music_frames = 0
+        self.music_frames_sent = 0
+        self.speech_frames_sent = 0
         self.speech: deque[tuple[discord.AudioSource, Path | None]] = deque()
         self.music_volume = 0.75
         self.tts_volume = 1.0
@@ -150,14 +152,17 @@ class Mixer(discord.AudioSource):
             self.music.cleanup()
             self.music = None
 
-    def enqueue_speech(self, source: discord.AudioSource, path: Path | None):
+    def enqueue_speech(self, source: discord.AudioSource, path: Path | None, *, priority: bool = False):
         with self._lock:
             if self.closed:
                 source.cleanup()
                 if path:
                     path.unlink(missing_ok=True)
             else:
-                self.speech.append((source, path))
+                if priority:
+                    self.speech.appendleft((source, path))
+                else:
+                    self.speech.append((source, path))
 
     def read(self) -> bytes:
         with self._lock:
@@ -174,6 +179,7 @@ class Mixer(discord.AudioSource):
                 if frame:
                     music = normalize(frame)
                     self.music_frames += 1
+                    self.music_frames_sent += 1
                 else:
                     if self.music_frames == 0 and self.on_music_error:
                         self.loop.call_soon_threadsafe(self.on_music_error)
@@ -188,6 +194,7 @@ class Mixer(discord.AudioSource):
                     frame = b""
                 if frame:
                     speech = normalize(frame)
+                    self.speech_frames_sent += 1
                     break
                 source.cleanup()
                 if path:
@@ -230,10 +237,16 @@ class GuildPlayer:
         self.playback_status = "idle"
         self.last_music_error: str | None = None
         self.last_tts_error: str | None = None
+        self.last_transport_error: str | None = None
         self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure)
         self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
         self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
-        self.vc.play(self.mixer)
+        self.vc.play(self.mixer, after=self._on_audio_player_end)
+
+    def _on_audio_player_end(self, error: Exception | None):
+        if error:
+            self.last_transport_error = type(error).__name__
+            log.error("Discord audio sender stopped with an error: %r", error)
 
     def add_tracks(self, tracks: list[Track], *, front: bool = False, now: bool = False):
         self.music_queue.add_many(tracks, front=front)
@@ -276,7 +289,7 @@ class GuildPlayer:
 
     def play_test_tone(self):
         """Play a network-free tone using the same PCM mixer and Discord voice path."""
-        self.mixer.enqueue_speech(DiagnosticTone(), None)
+        self.mixer.enqueue_speech(DiagnosticTone(), None, priority=True)
 
     async def _tts_worker(self):
         while True:
