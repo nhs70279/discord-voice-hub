@@ -27,6 +27,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 OAUTH_API = "https://discord.com/api/v10"
+_refresh_lock = asyncio.Lock()
 CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback")
@@ -91,28 +92,45 @@ async def login():
         "state": state,
     })
     response = RedirectResponse(url)
+    # A fresh login must never keep using a stale dashboard session.
+    response.delete_cookie("vh_session")
     response.set_cookie("vh_oauth_state", state, max_age=600, httponly=True, secure=SECURE_COOKIES, samesite="lax")
     return response
 
 
 async def exchange_token(data: dict) -> dict:
-    async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.post(
-            f"{OAUTH_API}/oauth2/token",
-            data={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, **data},
-        )
-        if response.status_code >= 400:
-            log.warning("Discord OAuth error %s", response.status_code)
-            raise HTTPException(401, "ยืนยันตัวตนกับ Discord ไม่สำเร็จ")
-        return response.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                f"{OAUTH_API}/oauth2/token",
+                data={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, **data},
+            )
+    except httpx.RequestError as error:
+        log.warning("Discord OAuth connection failed: %s", type(error).__name__)
+        raise HTTPException(503, "ไม่สามารถเชื่อมต่อ Discord ได้ชั่วคราว กรุณาลองอีกครั้ง") from error
+    if response.status_code >= 400:
+        log.warning("Discord OAuth error %s", response.status_code)
+        if response.status_code in (400, 401):
+            raise HTTPException(401, "ยืนยันตัวตนกับ Discord ไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่")
+        raise HTTPException(503, "Discord ไม่พร้อมให้เข้าสู่ระบบชั่วคราว กรุณาลองอีกครั้ง")
+    return response.json()
 
 
 async def discord_api(path: str, access_token: str):
-    async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.get(f"{OAUTH_API}{path}", headers={"Authorization": f"Bearer {access_token}"})
-        if response.status_code >= 400:
-            raise HTTPException(401, "เซสชัน Discord หมดอายุ กรุณาเข้าสู่ระบบใหม่")
-        return response.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(f"{OAUTH_API}{path}", headers={"Authorization": f"Bearer {access_token}"})
+    except httpx.RequestError as error:
+        log.warning("Discord API connection failed for %s: %s", path, type(error).__name__)
+        raise HTTPException(503, "ไม่สามารถเชื่อมต่อ Discord ได้ชั่วคราว กรุณาลองอีกครั้ง") from error
+    if response.status_code == 401:
+        raise HTTPException(401, "เซสชัน Discord หมดอายุ กรุณาเข้าสู่ระบบใหม่")
+    if response.status_code == 403:
+        raise HTTPException(403, "บัญชี Discord นี้ไม่มีสิทธิ์ที่จำเป็น กรุณาอนุญาตสิทธิ์ identify และ guilds")
+    if response.status_code >= 400:
+        log.warning("Discord API %s returned HTTP %s", path, response.status_code)
+        raise HTTPException(503, "Discord ไม่พร้อมให้บริการชั่วคราว กรุณาลองอีกครั้ง")
+    return response.json()
 
 
 @app.get("/auth/callback")
@@ -149,11 +167,35 @@ async def require_session(request: Request):
         raise HTTPException(401, "กรุณาเข้าสู่ระบบก่อนค่ะ")
     session = dict(item)
     if session["expires_at"] <= int(time.time()) + 90:
-        token = await exchange_token({"grant_type": "refresh_token", "refresh_token": session["refresh_token"]})
-        session.update({"access_token": token["access_token"], "refresh_token": token["refresh_token"], "expires_at": int(time.time()) + int(token["expires_in"])})
+        await refresh_session(session, session_hash)
+    return session
+
+
+async def refresh_session(session: dict, session_hash: str):
+    """Refresh an OAuth token once, even when several dashboard calls overlap."""
+    async with _refresh_lock:
+        with db.connect() as conn:
+            current = conn.execute("SELECT * FROM sessions WHERE session_hash=?", (session_hash,)).fetchone()
+        if not current:
+            raise HTTPException(401, "กรุณาเข้าสู่ระบบ Discord ใหม่ค่ะ")
+        if current["access_token"] != session["access_token"]:
+            session.update({key: current[key] for key in ("access_token", "refresh_token", "expires_at")})
+            return
+        try:
+            token = await exchange_token({"grant_type": "refresh_token", "refresh_token": session["refresh_token"]})
+        except HTTPException as error:
+            if error.status_code == 401:
+                with db.connect() as conn:
+                    conn.execute("DELETE FROM sessions WHERE session_hash=?", (session_hash,))
+                raise HTTPException(401, "กรุณาเข้าสู่ระบบ Discord ใหม่ค่ะ") from error
+            raise
+        session.update({
+            "access_token": token["access_token"],
+            "refresh_token": token["refresh_token"],
+            "expires_at": int(time.time()) + int(token["expires_in"]),
+        })
         with db.connect() as conn:
             conn.execute("UPDATE sessions SET access_token=?,refresh_token=?,expires_at=? WHERE session_hash=?", (session["access_token"], session["refresh_token"], session["expires_at"], session_hash))
-    return session
 
 
 @app.post("/auth/logout")
@@ -168,7 +210,16 @@ async def logout(request: Request):
 
 
 async def user_guilds(request: Request, session=Depends(require_session)):
-    available = await discord_api("/users/@me/guilds", session["access_token"])
+    try:
+        available = await discord_api("/users/@me/guilds", session["access_token"])
+    except HTTPException as error:
+        if error.status_code != 401:
+            raise
+        # A previously revoked/expired access token can fail before expires_at.
+        # Renew it once rather than sending the user into a login loop.
+        raw = request.cookies.get("vh_session", "")
+        await refresh_session(session, hashlib.sha256(raw.encode()).hexdigest())
+        available = await discord_api("/users/@me/guilds", session["access_token"])
     live_guild_ids = {str(g.id) for g in request.app.state.bot.guilds}
     return [g for g in available if str(g["id"]) in live_guild_ids]
 

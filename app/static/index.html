@@ -57,6 +57,7 @@
       <h1>สวัสดีค่ะ ฉันชื่อลิลิน 💜</h1>
       <p>ฉันจะอ่านแชตภาษาไทยด้วยเสียงนุ่มนวล และช่วยดูแลเพลง คิวเพลง และเพลย์ลิสต์บน Discord ให้คุณค่ะ</p>
       <a class="button" href="/auth/login">เข้าสู่ระบบด้วย Discord</a>
+      <p class="hint hidden" id="login-error" role="alert"></p>
       <p class="hint">ใช้สิทธิ์ identify และ guilds เพื่อตรวจสอบเซิร์ฟเวอร์ที่คุณเป็นสมาชิกเท่านั้น</p>
     </div>
   </div>
@@ -159,7 +160,7 @@
       drawPlaylists(await api(`/api/guilds/${guildId}/playlists`));
     }
     async function bootstrap(){
-      try{me=await api('/api/me')}catch(e){$('login').classList.remove('hidden');return}
+      try{me=await api('/api/me')}catch(e){$('login').classList.remove('hidden');if(!e.message.includes('กรุณาเข้าสู่ระบบก่อน')){$('login-error').textContent=e.message;$('login-error').classList.remove('hidden')}return}
       $('app').classList.remove('hidden');$('username').textContent='เข้าสู่ระบบ: '+me.name;
       $('status').textContent=me.bot_online?'ลิลินออนไลน์แล้ว':'ลิลินออฟไลน์ / รอการตั้งค่า';$('dot').classList.toggle('online',me.bot_online);
       $('voice').replaceChildren();for(const [name,label] of Object.entries(me.voices))option($('voice'),name,label);$('voice').value=me.voice_settings.voice;$('rate').value=me.voice_settings.rate;$('pitch').value=me.voice_settings.pitch;renderVoiceNumbers();
