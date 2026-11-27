@@ -4,7 +4,7 @@ import re
 
 
 def speech_text(author: str, content: str) -> str:
-    """Keep readable chat and drop markdown, Discord tags and code noise."""
+    """Read chat content directly, without names or the 'พิมพ์ว่า' prefix."""
     content = re.sub(r"```[\s\S]*?```", " ", content)
     content = re.sub(r"https?://\S+", " ลิงก์ ", content, flags=re.IGNORECASE)
     content = re.sub(r"<a?:[A-Za-z0-9_]+:\d+>", " ", content)
@@ -13,5 +13,4 @@ def speech_text(author: str, content: str) -> str:
     content = " ".join(content.split())[:180].strip()
     if not content:
         return ""
-    name = " ".join(author.split())[:32].strip()
-    return f"{name} พิมพ์ว่า {content}" if name else content
+    return content

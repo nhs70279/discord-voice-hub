@@ -87,8 +87,19 @@ class MusicStreamTests(unittest.TestCase):
         self.assertIsNone(fallback_title)
         self.assertEqual(youtube_dl.call_count, 2)
         options = youtube_dl.call_args_list[1].args[0]
-        self.assertEqual(options["extractor_args"]["youtube"]["player_client"], ["web_safari"])
+        self.assertEqual(options["extractor_args"]["youtube"]["player_client"], ["web_embedded"])
         self.assertEqual(ffmpeg.call_args.args, ("https://youtube-stream.example.invalid/audio",))
+
+    @patch("app.player.discord.FFmpegPCMAudio")
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_prefers_safari_hls_on_first_youtube_playback_attempt(self, youtube_dl, ffmpeg):
+        youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {
+            "url": "https://example.invalid/audio.m3u8", "http_headers": {}
+        }
+        music_audio_source("https://www.youtube.com/watch?v=abc")
+        options = youtube_dl.call_args.args[0]
+        self.assertEqual(options["extractor_args"]["youtube"]["player_client"], ["web_safari"])
+        self.assertEqual(options["format"], "bestaudio[protocol*=m3u8]/bestaudio/best")
 
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
@@ -111,7 +122,6 @@ class MusicStreamTests(unittest.TestCase):
             DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
-            DownloadError("Sign in to confirm you're not a bot"),
             {"entries": [
                 {"title": "Unrelated artist", "webpage_url": "https://soundcloud.com/a/wrong"},
                 {"title": "Ed Sheeran - Shape of You", "webpage_url": "https://soundcloud.com/ed/shape-of-you"},
@@ -129,7 +139,6 @@ class MusicStreamTests(unittest.TestCase):
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_does_not_play_unrelated_or_remixed_soundcloud_results(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
-            DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
@@ -186,7 +195,7 @@ class MusicStreamTests(unittest.TestCase):
 
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
-    def test_local_youtube_download_retries_safari_after_403(self, youtube_dl, ffmpeg):
+    def test_local_youtube_download_retries_embedded_after_403(self, youtube_dl, ffmpeg):
         def download(url, download):
             if youtube_dl.call_count == 1:
                 raise DownloadError("HTTP Error 403: Forbidden")
@@ -199,7 +208,8 @@ class MusicStreamTests(unittest.TestCase):
         ctx.prepare_filename.side_effect = lambda _: youtube_dl.call_args.args[0]["outtmpl"].replace("%(ext)s", "m4a")
         source = downloaded_youtube_source("https://www.youtube.com/watch?v=abc")
         self.assertEqual(youtube_dl.call_count, 2)
-        self.assertEqual(youtube_dl.call_args_list[1].args[0]["extractor_args"]["youtube"]["player_client"], ["web_safari"])
+        self.assertEqual(youtube_dl.call_args_list[0].args[0]["extractor_args"]["youtube"]["player_client"], ["web_safari"])
+        self.assertEqual(youtube_dl.call_args_list[1].args[0]["extractor_args"]["youtube"]["player_client"], ["web_embedded"])
         source.cleanup()
 
 

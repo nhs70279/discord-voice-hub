@@ -10,8 +10,8 @@ import logging
 from pathlib import Path
 
 log = logging.getLogger(__name__)
-EDGE_TIMEOUT_SECONDS = 8
-EDGE_COOLDOWN_SECONDS = 180
+EDGE_TIMEOUT_SECONDS = 4
+EDGE_COOLDOWN_SECONDS = 600
 GOOGLE_TIMEOUT_SECONDS = 15
 _edge_retry_at = 0.0
 
