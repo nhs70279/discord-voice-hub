@@ -174,6 +174,9 @@ def start_youtube_pot_provider() -> subprocess.Popen | None:
     """
     os.environ.pop("YOUTUBE_POT_READY", None)
     home = os.getenv("YOUTUBE_POT_SERVER_HOME", "").strip()
+    if not home and (DATA / "youtube-pot.enabled").is_file():
+        # The Wispbyte pre-start hook installs this once in private storage.
+        home = str(DATA / "bgutil-ytdlp-pot-provider" / "server")
     if not home:
         return None
     configured = Path(home).expanduser()
@@ -198,7 +201,8 @@ def start_youtube_pot_provider() -> subprocess.Popen | None:
     except OSError as exc:
         log.warning("YouTube PO provider could not start: %s", type(exc).__name__)
         return None
-    deadline = time.monotonic() + 4
+    # First launch on a small host may need to compile JS and load Canvas.
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline and process.poll() is None:
         try:
             with socket.create_connection(("127.0.0.1", 4416), timeout=0.15):
