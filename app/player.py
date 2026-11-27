@@ -238,6 +238,10 @@ class GuildPlayer:
         self.last_music_error: str | None = None
         self.last_tts_error: str | None = None
         self.last_transport_error: str | None = None
+        self.chat_events_seen = 0
+        self.chat_events_without_content = 0
+        self.chat_events_in_read_channel = 0
+        self.chat_messages_enqueued = 0
         self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure)
         self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
         self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
@@ -300,28 +304,34 @@ class GuildPlayer:
                 fd, filename = tempfile.mkstemp(suffix=".mp3", prefix="discord-tts-")
                 os.close(fd)
                 path = Path(filename)
-                await edge_tts.Communicate(
-                    text=message,
-                    voice=settings["voice"],
-                    rate=f'{settings["rate"]:+d}%',
-                    pitch=f'{settings["pitch"]:+d}Hz',
-                ).save(str(path))
+                await asyncio.wait_for(
+                    edge_tts.Communicate(
+                        text=message,
+                        voice=settings["voice"],
+                        rate=f'{settings["rate"]:+d}%',
+                        pitch=f'{settings["pitch"]:+d}Hz',
+                    ).save(str(path)),
+                    timeout=30,
+                )
                 source = discord.FFmpegPCMAudio(str(path), options="-vn")
                 self.mixer.enqueue_speech(source, path)
                 path = None  # Mixer now owns this file
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                self.last_tts_error = type(error).__name__
+                status = getattr(error, "status", None)
+                self.last_tts_error = f"{type(error).__name__} (HTTP {status})" if status else type(error).__name__
                 log.exception("TTS failed")
             finally:
                 if path:
                     path.unlink(missing_ok=True)
                 self.tts_queue.task_done()
 
-    async def add_speech(self, message: str, settings: dict):
-        if not self.tts_queue.full():
-            self.tts_queue.put_nowait((message, settings))
+    async def add_speech(self, message: str, settings: dict) -> bool:
+        if self.tts_queue.full():
+            return False
+        self.tts_queue.put_nowait((message, settings))
+        return True
 
     def skip(self):
         self._music_generation += 1
