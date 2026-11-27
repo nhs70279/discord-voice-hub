@@ -68,6 +68,25 @@ class DatabaseTests(unittest.TestCase):
         db.set_read_channel("111", 222)
         self.assertEqual(db.get_read_channel("111"), 222)
 
+    def test_auto_join_defaults_on_and_is_per_guild(self):
+        self.assertTrue(db.get_auto_join("111"))
+        db.set_auto_join("111", False)
+        self.assertFalse(db.get_auto_join("111"))
+        self.assertTrue(db.get_auto_join("222"))
+        db.set_read_channel("111", 333)  # Old setting remains compatible.
+        self.assertFalse(db.get_auto_join("111"))
+
+    def test_auto_join_migrates_existing_guild_settings(self):
+        with db.connect() as conn:
+            conn.execute("DROP TABLE guild_settings")
+            conn.execute("CREATE TABLE guild_settings(guild_id TEXT PRIMARY KEY, read_channel_id TEXT)")
+            conn.execute("INSERT INTO guild_settings VALUES (?,?)", ("111", "222"))
+        db.initialize()
+        self.assertTrue(db.get_auto_join("111"))
+        self.assertEqual(db.get_read_channel("111"), 222)
+        db.set_auto_join("111", False)
+        self.assertFalse(db.get_auto_join("111"))
+
     def test_non_thai_voices_are_rejected(self):
         self.assertEqual(list(db.VOICE_CHOICES), [db.DEFAULT_VOICE])
         with self.assertRaises(ValueError):
