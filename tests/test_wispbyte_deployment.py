@@ -1,10 +1,11 @@
 """Offline checks for the Wispbyte bot + web launcher."""
 
 import os
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import start_wispbyte
 
@@ -48,6 +49,47 @@ class WispbyteDeploymentTests(unittest.TestCase):
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/", ignore)
         self.assertIn(".runtime/", ignore)
+
+    def test_tunnel_is_opt_in_and_not_given_token_in_command_line(self):
+        with patch.dict(os.environ, {"CLOUDFLARE_TUNNEL_TOKEN": "private-test-token"}):
+            process = MagicMock()
+            with patch.object(start_wispbyte.subprocess, "Popen", return_value=process) as popen:
+                self.assertIs(start_wispbyte.start_cloudflare_tunnel(Path("/opt/cloudflared")), process)
+            argv = popen.call_args.args[0]
+            self.assertEqual(argv, ["/opt/cloudflared", "tunnel", "--protocol", "quic", "run"])
+            self.assertNotIn("private-test-token", " ".join(argv))
+            environment = popen.call_args.kwargs["env"]
+            self.assertEqual(environment["TUNNEL_TOKEN"], "private-test-token")
+            self.assertNotIn("CLOUDFLARE_TUNNEL_TOKEN", environment)
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(start_wispbyte.configure_cloudflared())
+
+    def test_cloudflared_binary_download_is_checksum_verified(self):
+        executable_bytes = b"test cloudflared executable"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+
+            def download(_url, target):
+                Path(target).write_bytes(executable_bytes)
+
+            with patch.dict(os.environ, {"CLOUDFLARE_TUNNEL_TOKEN": "private-test-token"}), \
+                patch.object(start_wispbyte, "RUNTIME", root), \
+                patch.object(start_wispbyte.shutil, "which", return_value=None), \
+                patch.object(start_wispbyte.urllib.request, "urlretrieve", side_effect=download), \
+                patch.object(start_wispbyte, "CLOUDFLARED_SHA256", hashlib.sha256(executable_bytes).hexdigest()):
+                binary = start_wispbyte.configure_cloudflared()
+                self.assertEqual(binary, root / "cloudflared")
+                self.assertTrue(binary.stat().st_mode & 0o100)
+
+            with patch.dict(os.environ, {"CLOUDFLARE_TUNNEL_TOKEN": "private-test-token"}), \
+                patch.object(start_wispbyte, "RUNTIME", root), \
+                patch.object(start_wispbyte.shutil, "which", return_value=None), \
+                patch.object(start_wispbyte.urllib.request, "urlretrieve", side_effect=download), \
+                patch.object(start_wispbyte, "CLOUDFLARED_SHA256", "0" * 64):
+                binary.unlink()
+                self.assertIsNone(start_wispbyte.configure_cloudflared())
+                self.assertFalse(binary.exists())
 
 
 if __name__ == "__main__":
