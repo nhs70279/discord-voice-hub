@@ -28,6 +28,14 @@ log = logging.getLogger(__name__)
 
 OAUTH_API = "https://discord.com/api/v10"
 _refresh_lock = asyncio.Lock()
+# The dashboard polls its queue frequently. Re-checking OAuth guild membership
+# for every local dashboard request quickly exhausts Discord's API allowance.
+# Keep this short-lived and tied to the access token, so OAuth refreshes do not
+# reuse permissions from an older token.
+GUILD_CACHE_TTL_SECONDS = 180
+GUILD_CACHE_MAX_ENTRIES = 512
+_guild_cache: dict[str, tuple[float, list[dict]]] = {}
+_guild_cache_lock = asyncio.Lock()
 CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback")
@@ -147,6 +155,33 @@ async def discord_api(path: str, access_token: str):
     return response.json()
 
 
+async def cached_discord_guilds(access_token: str) -> list[dict]:
+    """Coalesce dashboard guild lookups and cache only successful API results."""
+    key = hashlib.sha256(access_token.encode()).hexdigest()
+    now = time.monotonic()
+    cached = _guild_cache.get(key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
+    async with _guild_cache_lock:
+        # Concurrent dashboard requests must not independently hit Discord.
+        now = time.monotonic()
+        cached = _guild_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
+        guilds = await discord_api("/users/@me/guilds", access_token)
+        if len(_guild_cache) >= GUILD_CACHE_MAX_ENTRIES:
+            for stale_key, (expires_at, _) in list(_guild_cache.items()):
+                if expires_at <= now:
+                    del _guild_cache[stale_key]
+            if len(_guild_cache) >= GUILD_CACHE_MAX_ENTRIES:
+                oldest = min(_guild_cache, key=lambda item: _guild_cache[item][0])
+                del _guild_cache[oldest]
+        _guild_cache[key] = (time.monotonic() + GUILD_CACHE_TTL_SECONDS, guilds)
+        return guilds
+
+
 @app.get("/auth/callback")
 async def callback(request: Request, code: str = "", state: str = ""):
     expected = request.cookies.get("vh_oauth_state", "")
@@ -225,7 +260,7 @@ async def logout(request: Request):
 
 async def user_guilds(request: Request, session=Depends(require_session)):
     try:
-        available = await discord_api("/users/@me/guilds", session["access_token"])
+        available = await cached_discord_guilds(session["access_token"])
     except HTTPException as error:
         if error.status_code != 401:
             raise
@@ -233,7 +268,7 @@ async def user_guilds(request: Request, session=Depends(require_session)):
         # Renew it once rather than sending the user into a login loop.
         raw = request.cookies.get("vh_session", "")
         await refresh_session(session, hashlib.sha256(raw.encode()).hexdigest())
-        available = await discord_api("/users/@me/guilds", session["access_token"])
+        available = await cached_discord_guilds(session["access_token"])
     live_guild_ids = {str(g.id) for g in request.app.state.bot.guilds}
     return [g for g in available if str(g["id"]) in live_guild_ids]
 
