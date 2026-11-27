@@ -1,7 +1,7 @@
 """Discord slash commands. /join immediately enables channel TTS."""
 
 import asyncio
-import importlib.util
+import importlib.metadata
 import logging
 
 import discord
@@ -147,9 +147,17 @@ class VoiceCommands(commands.Cog):
         player = self.bot.guild_players.get(interaction.guild_id)
         if player is None:
             return await interaction.response.send_message("ลิลินยังไม่ได้เข้าห้องเสียงค่ะ กรุณาใช้ /join ก่อน", ephemeral=True)
-        dave = "พร้อม" if importlib.util.find_spec("davey") else "ไม่พบ"
+        try:
+            dave_version = importlib.metadata.version("davey")
+        except importlib.metadata.PackageNotFoundError:
+            dave_version = "ไม่พบ"
+        voice_state = getattr(player.vc, "_connection", None)
+        dave_session = getattr(voice_state, "dave_session", None)
+        dave_ready = bool(dave_session and getattr(dave_session, "ready", False))
+        dave_protocol = getattr(voice_state, "dave_protocol_version", 0)
         lines = [
-            f"🔎 discord.py: {discord.__version__} / DAVE: {dave}",
+            f"🔎 discord.py: {discord.__version__} / davey: {dave_version}",
+            f"🔐 DAVE เข้ารหัสพร้อม: {'ใช่' if dave_ready else 'ไม่'} (protocol {dave_protocol})",
             f"🔊 เชื่อมต่อเสียง: {'ใช่' if player.vc.is_connected() else 'ไม่'}",
             f"📡 ส่งเสียง: {'ใช่' if player.vc.is_playing() else 'ไม่'}",
             f"📦 เฟรมเสียงที่สร้าง: เพลง {player.mixer.music_frames_sent} / เสียงอ่านและทดสอบ {player.mixer.speech_frames_sent}",
@@ -158,6 +166,8 @@ class VoiceCommands(commands.Cog):
             f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
             f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",
         ]
+        if discord.__version__ == "2.7.1" and dave_version.startswith("0.2."):
+            lines.append("⚠️ davey 0.2.x ยังไม่รองรับ discord.py 2.7.1 กรุณาใช้ davey 0.1.6")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="play", description="เล่นเพลงด้วยชื่อหรือลิงก์ YouTube หรือเพลย์ลิสต์")
