@@ -112,7 +112,7 @@ async def exchange_token(data: dict) -> dict:
         log.warning("Discord OAuth error %s", response.status_code)
         if response.status_code in (400, 401):
             raise HTTPException(401, "ยืนยันตัวตนกับ Discord ไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่")
-        raise HTTPException(503, "Discord ไม่พร้อมให้เข้าสู่ระบบชั่วคราว กรุณาลองอีกครั้ง")
+        raise HTTPException(503, f"Discord ไม่พร้อมให้เข้าสู่ระบบชั่วคราว (HTTP {response.status_code}) กรุณาลองอีกครั้ง")
     return response.json()
 
 
@@ -141,7 +141,9 @@ async def discord_api(path: str, access_token: str):
         raise HTTPException(403, "บัญชี Discord นี้ไม่มีสิทธิ์ที่จำเป็น กรุณาอนุญาตสิทธิ์ identify และ guilds")
     if response.status_code >= 400:
         log.warning("Discord API %s returned HTTP %s", path, response.status_code)
-        raise HTTPException(503, "Discord ไม่พร้อมให้บริการชั่วคราว กรุณาลองอีกครั้ง")
+        if response.status_code == 429:
+            raise HTTPException(503, "Discord จำกัดจำนวนคำขอชั่วคราว (HTTP 429) กรุณารอสักครู่แล้วลองอีกครั้ง")
+        raise HTTPException(503, f"Discord ไม่พร้อมให้บริการชั่วคราว (HTTP {response.status_code}) กรุณาลองอีกครั้ง")
     return response.json()
 
 
