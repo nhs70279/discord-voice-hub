@@ -10,6 +10,29 @@ from app import tts_fallback
 
 
 class ThaiTTSTests(unittest.IsolatedAsyncioTestCase):
+    async def test_warmup_primes_one_thai_audio_clip_without_switching_engine(self):
+        with patch.dict(os.environ, {"LILIN_TTS_WARMUP": "1"}):
+            async def fake_synthesis(text, settings, path):
+                self.assertEqual(text, "สวัสดีค่ะ")
+                path.write_bytes(b"G" * 300)
+                return "Google Thai"
+
+            with patch.object(tts_fallback, "synthesize_thai", side_effect=fake_synthesis) as synth:
+                await tts_fallback.warmup_thai()
+        self.assertEqual(synth.call_count, 1)
+
+    async def test_warmup_can_be_disabled(self):
+        with patch.dict(os.environ, {"LILIN_TTS_WARMUP": "0"}):
+            with patch.object(tts_fallback, "synthesize_thai") as synth:
+                await tts_fallback.warmup_thai()
+        synth.assert_not_called()
+
+    async def test_failed_warmup_does_not_block_subsequent_tts(self):
+        with patch.dict(os.environ, {"LILIN_TTS_WARMUP": "1"}):
+            with patch.object(tts_fallback, "synthesize_thai", new=AsyncMock(side_effect=RuntimeError("test"))) as synth:
+                await tts_fallback.warmup_thai()
+        synth.assert_awaited_once()
+
     async def test_google_voice_is_the_only_default(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"LILIN_TTS_ENGINE": "google"}):
             path = Path(tmp) / "tts.mp3"

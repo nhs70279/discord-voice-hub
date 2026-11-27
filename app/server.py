@@ -364,7 +364,7 @@ def web_voice_player(request: Request, guild_id: str, user_id: str):
 async def get_queue(request: Request, guild_id: str, guild=Depends(require_guild)):
     player = request.app.state.bot.guild_players.get(int(guild_id))
     if not player or not player.vc.is_connected():
-        return {"connected": False, "now_playing": None, "upcoming": [], "paused": False, "repeat": "off", "playback_status": "idle", "music_error": None, "music_fallback": None, "tts_error": None}
+        return {"connected": False, "now_playing": None, "upcoming": [], "paused": False, "repeat": "off", "playback_status": "idle", "music_error": None, "tts_error": None}
     return {
         "connected": True,
         "now_playing": {"title": player.current.title, "requester": player.current.requester} if player.current else None,
@@ -373,7 +373,6 @@ async def get_queue(request: Request, guild_id: str, guild=Depends(require_guild
         "repeat": player.repeat_mode,
         "playback_status": player.playback_status,
         "music_error": player.last_music_error,
-        "music_fallback": player.last_music_fallback if player.current else None,
         "tts_error": player.last_tts_error,
     }
 
@@ -434,7 +433,7 @@ async def queue_command(request: Request, guild_id: str, command: str, session=D
 async def add_item(guild_id: str, playlist_id: int, data: TrackRequest, session=Depends(require_session), guild=Depends(require_guild)):
     from .player import valid_query
     if not valid_query(data.query):
-        raise HTTPException(400, "กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube หรือ SoundCloud แบบ HTTPS")
+        raise HTTPException(400, "กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
     try:
         success = db.add_playlist_item(session["user_id"], guild_id, playlist_id, data.query.strip())
     except ValueError as error:

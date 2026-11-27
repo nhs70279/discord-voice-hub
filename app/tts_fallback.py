@@ -5,11 +5,15 @@ female voice; never alternate voices mid-conversation after a failure.
 """
 
 import asyncio
+import logging
 import os
+import tempfile
+import time
 from pathlib import Path
 
 EDGE_TIMEOUT_SECONDS = 12
 GOOGLE_TIMEOUT_SECONDS = 15
+log = logging.getLogger(__name__)
 
 
 async def _edge_save(text: str, settings: dict, path: Path):
@@ -45,3 +49,22 @@ async def synthesize_thai(text: str, settings: dict, path: Path) -> str:
         engine = "Google Thai"
     _check_audio(path)
     return engine
+
+
+async def warmup_thai() -> None:
+    """Prime imports, worker thread, DNS and voice service without audible speech.
+
+    Best effort: the bot and first chat must never wait for this request.
+    """
+    if os.getenv("LILIN_TTS_WARMUP", "1").strip().lower() in {"0", "false", "off"}:
+        return
+    started = time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(prefix="lilin-tts-warmup-") as folder:
+            path = Path(folder) / "warmup.mp3"
+            settings = {"voice": "th-TH-PremwadeeNeural", "rate": 0, "pitch": 0}
+            await asyncio.wait_for(synthesize_thai("สวัสดีค่ะ", settings, path), timeout=GOOGLE_TIMEOUT_SECONDS)
+        log.info("Thai TTS warmed up in %.2f seconds", time.monotonic() - started)
+    except Exception as error:
+        # Never change voices or delay Discord startup if the warm-up fails.
+        log.warning("Thai TTS warm-up unavailable (%s); normal requests still work", type(error).__name__)
