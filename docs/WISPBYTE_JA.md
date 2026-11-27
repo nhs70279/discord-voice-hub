@@ -57,6 +57,8 @@ Pythonサーバー自体は`SERVER_PORT`（なければ`PORT`）にバインド�
 
 ## 4. 音声再生用のFFmpegとDeno
 
+YouTubeから「Sign in to confirm you're not a bot」と返る場合のPremium向け実験構成は、[タイ語のPO TokenとCookie設定ガイド](WISPBYTE_YOUTUBE_TH.md)を参照。設定は任意で、既存の再生・読み上げを停止させずに戻せる。
+
 Wispbyteの無料Pythonイメージはroot権限がないので`apt install ffmpeg`を前提にできない。このリポジトリでは、Wispbyte専用`requirements.wispbyte.txt`に`imageio-ffmpeg`を追加してFFmpeg実行ファイルを提供する。
 
 `start_wispbyte.py`は次を行う。

@@ -65,6 +65,38 @@ class WispbyteDeploymentTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertIsNone(start_wispbyte.configure_cloudflared())
 
+    def test_pot_provider_is_opt_in(self):
+        with patch.dict(os.environ, {"YOUTUBE_POT_READY": "1"}, clear=True):
+            self.assertIsNone(start_wispbyte.start_youtube_pot_provider())
+            self.assertNotIn("YOUTUBE_POT_READY", os.environ)
+
+    def test_pot_provider_does_not_receive_bot_secrets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            server = Path(folder) / "server"
+            (server / "node_modules").mkdir(parents=True)
+            (server / "src").mkdir()
+            (server / "src" / "main.ts").write_text("", encoding="utf-8")
+            process = MagicMock()
+            process.poll.return_value = None
+            with patch.dict(os.environ, {
+                "YOUTUBE_POT_SERVER_HOME": str(server),
+                "YOUTUBE_POT_READY": "", "DISCORD_TOKEN": "sensitive-discord-test-token",
+                "DISCORD_CLIENT_SECRET": "sensitive-oauth-test-secret",
+                "YOUTUBE_COOKIES_PATH": "sensitive-cookie-path",
+            }), patch.object(start_wispbyte.shutil, "which", return_value="/opt/deno"), \
+                patch.object(start_wispbyte.subprocess, "Popen", return_value=process) as popen, \
+                patch.object(start_wispbyte.socket, "create_connection"):
+                self.assertIs(start_wispbyte.start_youtube_pot_provider(), process)
+                self.assertEqual(os.environ["YOUTUBE_POT_READY"], "1")
+
+            arguments = popen.call_args.args[0]
+            self.assertIn("--host", arguments)
+            self.assertEqual(arguments[arguments.index("--host") + 1], "127.0.0.1")
+            sanitized = popen.call_args.kwargs["env"]
+            self.assertNotIn("DISCORD_TOKEN", sanitized)
+            self.assertNotIn("DISCORD_CLIENT_SECRET", sanitized)
+            self.assertNotIn("YOUTUBE_COOKIES_PATH", sanitized)
+
     def test_cloudflared_binary_download_is_checksum_verified(self):
         executable_bytes = b"test cloudflared executable"
         with tempfile.TemporaryDirectory() as folder:
