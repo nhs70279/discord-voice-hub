@@ -1,38 +1,41 @@
-# Replace this placeholder with YOUR globally unique Fly.io app name.
-# Keep one Machine only: the Discord Bot must not run twice per token.
-app = "voice-hub-change-me"
-primary_region = "nrt"
-kill_signal = "SIGINT"
-kill_timeout = "30s"
+# fly.toml app configuration file generated for discord-voice-hub on 2026-11-27T00:35:26Z
+#
+# See https://docs.fly.io/reference/configuration for information about how to use this file.
+#
+
+app = 'discord-voice-hub'
+primary_region = 'iad'
+kill_signal = 'SIGINT'
+kill_timeout = '30s'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  COOKIE_SECURE = "true"
-  DATABASE_PATH = "/data/voice_hub.sqlite3"
+  COOKIE_SECURE = 'true'
+  DATABASE_PATH = '/data/voice_hub.sqlite3'
+
+[[mounts]]
+  source = 'voicehub_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = false
   min_machines_running = 1
 
   [[http_service.checks]]
-    method = "GET"
-    path = "/healthz"
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "20s"
-
-[mounts]
-  source = "voicehub_data"
-  destination = "/data"
-
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '20s'
+    method = 'GET'
+    path = '/healthz'
 
 [[restart]]
-  policy = "on-failure"
+  policy = 'on-failure'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
