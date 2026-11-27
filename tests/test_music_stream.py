@@ -71,8 +71,26 @@ class MusicStreamTests(unittest.TestCase):
 
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
+    def test_prefers_alternate_youtube_clients_before_soundcloud(self, youtube_dl, ffmpeg):
+        youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
+            DownloadError("Sign in to confirm you're not a bot"),
+            {"url": "https://youtube-stream.example.invalid/audio", "http_headers": {}},
+        ]
+        source, fallback_title = music_audio_source(
+            "https://www.youtube.com/watch?v=abc", "Ed Sheeran - Shape of You"
+        )
+        self.assertIs(source, ffmpeg.return_value)
+        self.assertIsNone(fallback_title)
+        self.assertEqual(youtube_dl.call_count, 2)
+        options = youtube_dl.call_args_list[1].args[0]
+        self.assertEqual(options["extractor_args"]["youtube"]["player_client"], ["android_vr", "web_safari"])
+        self.assertEqual(ffmpeg.call_args.args, ("https://youtube-stream.example.invalid/audio",))
+
+    @patch("app.player.discord.FFmpegPCMAudio")
+    @patch("app.player.yt_dlp.YoutubeDL")
     def test_youtube_signin_error_uses_close_soundcloud_match(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
+            DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
             {"entries": [
                 {"title": "Unrelated artist", "webpage_url": "https://soundcloud.com/a/wrong"},
@@ -91,6 +109,7 @@ class MusicStreamTests(unittest.TestCase):
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_does_not_play_unrelated_or_remixed_soundcloud_results(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = [
+            DownloadError("Sign in to confirm you're not a bot"),
             DownloadError("Sign in to confirm you're not a bot"),
             {"entries": [
                 {"title": "Something else", "webpage_url": "https://soundcloud.com/a/wrong"},

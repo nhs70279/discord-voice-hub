@@ -138,7 +138,7 @@ def discover_tracks(query: str) -> list[dict]:
 
 
 def music_audio_source(url: str, title: str | None = None) -> tuple[discord.AudioSource, str | None]:
-    """Acquire a stream URL, trying a verified SoundCloud match if YouTube blocks us."""
+    """Prefer YouTube clients; only then try a verified SoundCloud match."""
     fallback_title = None
     options = {
         "quiet": True, "no_warnings": True, "format": "bestaudio/best", "noplaylist": True,
@@ -150,6 +150,24 @@ def music_audio_source(url: str, title: str | None = None) -> tuple[discord.Audi
     except yt_dlp.utils.DownloadError as error:
         if urlparse(url).hostname not in YOUTUBE_HOSTS or "sign in to confirm" not in str(error).lower():
             raise
+        # These supported YouTube clients can provide alternate playable formats
+        # without loading a user's account cookies. They do not guarantee that
+        # YouTube will accept traffic from this server's IP address.
+        alternate_options = {
+            **options,
+            "extractor_args": {"youtube": {"player_client": ["android_vr", "web_safari"]}},
+        }
+        try:
+            with yt_dlp.YoutubeDL(alternate_options) as downloader:
+                info = downloader.extract_info(url, download=False)
+            if info and info.get("url"):
+                log.info("YouTube stream resolved using alternate player clients")
+        except yt_dlp.utils.DownloadError as alternate_error:
+            log.warning("Alternate YouTube clients were also rejected: %s", type(alternate_error).__name__)
+            info = None
+        if info and info.get("url"):
+            # Only switch services if neither YouTube extraction path worked.
+            return _ffmpeg_stream(info), None
         try:
             alternative = _matching_soundcloud_track(title or "")
             if alternative:
@@ -168,6 +186,11 @@ def music_audio_source(url: str, title: str | None = None) -> tuple[discord.Audi
             raise MusicSourceUnavailable(
                 "YouTube ต้องยืนยันการเข้าสู่ระบบ และ SoundCloud ก็โหลดเพลงนี้ไม่ได้ค่ะ"
             ) from fallback_error
+    return _ffmpeg_stream(info), fallback_title
+
+
+def _ffmpeg_stream(info: dict | None) -> discord.AudioSource:
+    """Pass yt-dlp's required stream headers to FFmpeg without leaking others."""
     if not info or not info.get("url"):
         raise MusicSourceUnavailable("ไม่พบสตรีมเสียงสำหรับเพลงนี้ค่ะ")
     # YouTube may require the same HTTP headers that yt-dlp used to resolve the
@@ -184,12 +207,11 @@ def music_audio_source(url: str, title: str | None = None) -> tuple[discord.Audi
     before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
     if header_lines:
         before_options += " -headers " + shlex.quote(header_lines)
-    source = discord.FFmpegPCMAudio(
+    return discord.FFmpegPCMAudio(
         info["url"],
         before_options=before_options,
         options="-vn",
     )
-    return source, fallback_title
 
 
 class DiagnosticTone(discord.AudioSource):
