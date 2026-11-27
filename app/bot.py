@@ -3,6 +3,8 @@
 import asyncio
 import importlib.metadata
 import logging
+import os
+import shutil
 
 import discord
 from discord import app_commands
@@ -258,6 +260,14 @@ class VoiceCommands(commands.Cog):
             edge_version = importlib.metadata.version("edge-tts")
         except importlib.metadata.PackageNotFoundError:
             edge_version = "ไม่พบ"
+        try:
+            youtube_version = importlib.metadata.version("yt-dlp")
+        except importlib.metadata.PackageNotFoundError:
+            youtube_version = "ไม่พบ"
+        try:
+            ejs_version = importlib.metadata.version("yt-dlp-ejs")
+        except importlib.metadata.PackageNotFoundError:
+            ejs_version = "ไม่พบ"
         voice_state = getattr(player.vc, "_connection", None)
         dave_session = getattr(voice_state, "dave_session", None)
         dave_ready = bool(dave_session and getattr(dave_session, "ready", False))
@@ -265,6 +275,8 @@ class VoiceCommands(commands.Cog):
         lines = [
             f"🔎 discord.py: {discord.__version__} / davey: {dave_version}",
             f"🎙️ edge-tts: {edge_version}",
+            f"🎵 YouTube extractor: {youtube_version} / EJS: {ejs_version} / Deno: {'พร้อม' if shutil.which('deno') else 'ไม่พบ'}",
+            f"🔑 YouTube Cookies: {'ตั้งค่าพาธแล้ว' if os.getenv('YOUTUBE_COOKIES_PATH') else 'ไม่ได้ตั้งค่า'}",
             "📝 ช่องแชตที่อ่าน: ทุกช่อง รวมถึงแชตในห้องเสียง",
             f"🚪 เข้าห้องเสียงอัตโนมัติ: {'เปิด' if db.get_auto_join(interaction.guild_id) else 'ปิด'}",
             f"📨 แชตที่ได้รับ: {player.chat_events_seen} / มีข้อความ: {player.chat_events_in_read_channel} / เข้าคิวเสียง: {player.chat_messages_enqueued}",

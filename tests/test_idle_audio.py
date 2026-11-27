@@ -132,6 +132,26 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         self.assertTrue(self.voice.is_playing())
 
+    async def test_youtube_stream_without_frames_recovers_with_local_audio(self):
+        local_source = FakeAudioSource([bytes([7]) * FRAME_BYTES])
+        with patch.object(self.module, "music_audio_source", return_value=(FakeAudioSource([]), None)), \
+             patch.object(self.module, "downloaded_youtube_source", return_value=local_source) as download:
+            self.player.add_tracks([self.module.Track("Song", "https://www.youtube.com/watch?v=abc", "user")])
+            for _ in range(100):
+                if self.player.mixer.music is not None:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertIsNotNone(self.player.mixer.music)
+            self.player.mixer.read()  # Remote stream immediately produced EOF.
+            for _ in range(100):
+                if self.player.mixer.music is local_source:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertIs(self.player.mixer.music, local_source)
+            download.assert_called_once_with("https://www.youtube.com/watch?v=abc")
+            self.assertNotEqual(self.player.mixer.read(), SILENCE)
+            self.assertIsNone(self.player.last_music_error)
+
 
 if __name__ == "__main__":
     unittest.main()
