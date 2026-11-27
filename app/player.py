@@ -111,13 +111,15 @@ class DiagnosticTone(discord.AudioSource):
 
 
 class Mixer(discord.AudioSource):
-    """Persistent PCM source; ducks music only while speech is audible."""
+    """PCM source that ducks music during speech and parks its sender when idle."""
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, on_music_end, on_music_error=None):
+    def __init__(self, loop: asyncio.AbstractEventLoop, on_music_end, on_music_error=None, on_idle=None):
         self.loop = loop
         self.on_music_end = on_music_end
         self.on_music_error = on_music_error
+        self.on_idle = on_idle
         self._lock = threading.RLock()
+        self._idle_notified = False
         self.music: discord.AudioSource | None = None
         self.music_frames = 0
         self.music_frames_sent = 0
@@ -141,6 +143,7 @@ class Mixer(discord.AudioSource):
             self.music = source
             self.music_frames = 0
             self.paused = False
+            self._idle_notified = False
 
     def skip(self):
         with self._lock:
@@ -163,6 +166,17 @@ class Mixer(discord.AudioSource):
                     self.speech.appendleft((source, path))
                 else:
                     self.speech.append((source, path))
+                self._idle_notified = False
+
+    def has_active_audio(self) -> bool:
+        """Check if there is audio to send, without decoding or encoding a frame."""
+        with self._lock:
+            return not self.closed and (bool(self.speech) or (self.music is not None and not self.paused))
+
+    def set_music_paused(self, paused: bool):
+        with self._lock:
+            self.paused = paused
+            self._idle_notified = False
 
     def read(self) -> bytes:
         with self._lock:
@@ -204,6 +218,10 @@ class Mixer(discord.AudioSource):
                 return mix_pcm(music, speech, self.music_volume * self.duck_fraction, self.tts_volume)
             if music != SILENCE:
                 return mix_pcm(music, SILENCE, self.music_volume, 0)
+            if not self.speech and (self.music is None or self.paused) and not self._idle_notified:
+                self._idle_notified = True
+                if self.on_idle:
+                    self.loop.call_soon_threadsafe(self.on_idle)
             return SILENCE
 
     def cleanup(self):
@@ -244,10 +262,29 @@ class GuildPlayer:
         self.chat_events_in_read_channel = 0
         self.chat_messages_enqueued = 0
         self.chat_messages_private_skipped = 0
-        self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure)
+        self.mixer = Mixer(loop, self.music_done.set, self._report_stream_failure, self._pause_audio_if_idle)
         self.music_task = loop.create_task(self._music_worker(), name=f"music-{vc.guild.id}")
         self.tts_task = loop.create_task(self._tts_worker(), name=f"tts-{vc.guild.id}")
         self.vc.play(self.mixer, after=self._on_audio_player_end)
+        # discord.py otherwise Opus-encodes 50 silence frames/second forever,
+        # even when nobody has queued music or speech. Free hosts cap CPU usage.
+        self._pause_audio_if_idle()
+
+    def _pause_audio_if_idle(self):
+        if not self.mixer.has_active_audio() and self.vc.is_playing():
+            self.vc.pause()
+
+    def _resume_audio(self):
+        if self.mixer.has_active_audio() and self.vc.is_paused():
+            self.vc.resume()
+
+    def pause_music(self):
+        self.mixer.set_music_paused(True)
+        self._pause_audio_if_idle()
+
+    def resume_music(self):
+        self.mixer.set_music_paused(False)
+        self._resume_audio()
 
     def _on_audio_player_end(self, error: Exception | None):
         if error:
@@ -274,6 +311,7 @@ class GuildPlayer:
                 self.music_done.clear()
                 self.mixer.set_music(source)
                 self.playback_status = "playing"
+                self._resume_audio()
                 await self.music_done.wait()
                 if generation == self._music_generation and self.repeat_mode in {"one", "all"}:
                     self.music_queue.add_many([track], front=self.repeat_mode == "one")
@@ -296,6 +334,7 @@ class GuildPlayer:
     def play_test_tone(self):
         """Play a network-free tone using the same PCM mixer and Discord voice path."""
         self.mixer.enqueue_speech(DiagnosticTone(), None, priority=True)
+        self._resume_audio()
 
     async def _tts_worker(self):
         while True:
@@ -309,6 +348,7 @@ class GuildPlayer:
                 self.last_tts_engine = await synthesize_thai(message, settings, path)
                 source = discord.FFmpegPCMAudio(str(path), options="-vn")
                 self.mixer.enqueue_speech(source, path)
+                self._resume_audio()
                 path = None  # Mixer now owns this file
             except asyncio.CancelledError:
                 raise
