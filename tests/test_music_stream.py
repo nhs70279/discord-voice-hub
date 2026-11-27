@@ -117,11 +117,12 @@ class MusicStreamTests(unittest.TestCase):
 
     @patch("app.player.discord.FFmpegPCMAudio")
     @patch("app.player.yt_dlp.YoutubeDL")
-    def test_provider_selects_one_youtube_client(self, youtube_dl, ffmpeg):
+    def test_provider_uses_multiple_youtube_clients_in_one_extraction(self, youtube_dl, ffmpeg):
         youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {"url": "https://audio.example.invalid/a"}
         with patch.dict(os.environ, {"YOUTUBE_POT_READY": "1"}):
             music_audio_source(self.YOUTUBE_URL)
-        self.assertEqual(youtube_dl.call_args.args[0]["extractor_args"]["youtube"]["player_client"], ["mweb"])
+        self.assertEqual(youtube_dl.call_args.args[0]["extractor_args"]["youtube"]["player_client"], ["mweb", "tv", "web_safari"])
+        self.assertEqual(youtube_dl.call_count, 1)
         with patch.dict(os.environ, {"YOUTUBE_POT_READY": "0"}):
             music_audio_source(self.YOUTUBE_URL)
         self.assertEqual(youtube_dl.call_args.args[0]["extractor_args"]["youtube"]["player_client"], ["web_safari"])
