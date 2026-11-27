@@ -6,3 +6,7 @@
 # The paid Wispbyte Python image already has 0.8.1. Updating to 0.8.2
 # re-downloads a 68 MB FFmpeg wheel and can exhaust its small pip temp volume.
 imageio-ffmpeg==0.8.1
+
+# PO token plugin for yt-dlp. Requires the separate local bgutil provider
+# process; this Python package alone cannot generate tokens.
+bgutil-ytdlp-pot-provider==2.0.2
