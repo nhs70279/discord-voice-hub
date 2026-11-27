@@ -1,4 +1,6 @@
-discord.py[voice]>=2.7,<3
+# Keep the known-compatible DAVE stack until discord.py supports davey 0.2.x.
+discord.py[voice]==2.7.1
+davey==0.1.6
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 httpx>=0.27,<1
