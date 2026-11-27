@@ -45,7 +45,8 @@ def initialize():
                 pitch INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS guild_settings (
-                guild_id TEXT PRIMARY KEY, read_channel_id TEXT
+                guild_id TEXT PRIMARY KEY, read_channel_id TEXT,
+                auto_join_enabled INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS playlists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +71,9 @@ def initialize():
             db.execute("ALTER TABLE preferences ADD COLUMN rate INTEGER NOT NULL DEFAULT 0")
         if "pitch" not in columns:
             db.execute("ALTER TABLE preferences ADD COLUMN pitch INTEGER NOT NULL DEFAULT 0")
+        guild_columns = {row["name"] for row in db.execute("PRAGMA table_info(guild_settings)")}
+        if "auto_join_enabled" not in guild_columns:
+            db.execute("ALTER TABLE guild_settings ADD COLUMN auto_join_enabled INTEGER NOT NULL DEFAULT 1")
         # Keep one consistent Lilin voice, migrating old male/non-Thai settings.
         # Preserve users' speed, pitch, and playlist settings.
         db.execute(
@@ -123,7 +127,22 @@ def get_read_channel(guild_id: int | str) -> int | None:
 
 def set_read_channel(guild_id: int | str, channel_id: int | str | None):
     with connect() as db:
-        db.execute("INSERT INTO guild_settings VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET read_channel_id=excluded.read_channel_id", (str(guild_id), str(channel_id) if channel_id else None))
+        db.execute("INSERT INTO guild_settings(guild_id,read_channel_id) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET read_channel_id=excluded.read_channel_id", (str(guild_id), str(channel_id) if channel_id else None))
+
+
+def get_auto_join(guild_id: int | str) -> bool:
+    with connect() as conn:
+        row = conn.execute("SELECT auto_join_enabled FROM guild_settings WHERE guild_id=?", (str(guild_id),)).fetchone()
+        return bool(row["auto_join_enabled"]) if row is not None else True
+
+
+def set_auto_join(guild_id: int | str, enabled: bool):
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO guild_settings(guild_id,auto_join_enabled) VALUES (?,?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET auto_join_enabled=excluded.auto_join_enabled",
+            (str(guild_id), int(enabled)),
+        )
 
 
 def list_playlists(user_id: str, guild_id: str):
