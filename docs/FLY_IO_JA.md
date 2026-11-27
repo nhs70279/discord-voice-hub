@@ -138,7 +138,7 @@ https://my-voice-hub-123.fly.dev/healthz
 
 ## 7. Bot機能を確認
 
-1. DiscordでVoice Channelに入って `/join`（実行したテキストチャンネルをタイ語で自動読み上げ）
+1. DiscordでVoice Channelに入るとリリンが自動参加し、全テキストチャンネルとVC内チャットを読み上げます。手動の `/join` も利用可能です。`/testtts` で音声を確認できます。
 2. `/play 曲名` または `/play https://www.youtube.com/watch?v=...`
 3. `/queue`, `/skip`, `/next 曲名`, `/playnow 曲名`, `/remove 1`, `/move`, `/clear`, `/pause`, `/resume`, `/repeat`
 4. WebダッシュボードにDiscordでログインし、個人別のタイ語女性声・男性声／速度・高さを変更
