@@ -268,6 +268,26 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
             resolve.assert_called_once_with("https://www.youtube.com/watch?v=abc")
             download.assert_not_called()
 
+    async def test_fast_youtube_url_updates_title_after_stream_resolution(self):
+        track = self.module.Track(
+            self.module.YOUTUBE_TITLE_PENDING,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "user",
+        )
+        stream = FakeAudioSource([bytes([3]) * FRAME_BYTES])
+
+        def resolve(_url, *, title_callback):
+            title_callback("Actual YouTube song")
+            return stream
+
+        with patch.object(self.module, "music_audio_source", side_effect=resolve):
+            self.player.add_tracks([track])
+            for _ in range(100):
+                if self.player.mixer.music is stream:
+                    break
+                await asyncio.sleep(0.01)
+        self.assertIs(self.player.mixer.music, stream)
+        self.assertEqual(track.title, "Actual YouTube song")
+
 
 if __name__ == "__main__":
     unittest.main()

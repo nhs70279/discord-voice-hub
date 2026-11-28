@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import shlex
 import tempfile
 import threading
@@ -11,7 +12,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import discord
 import yt_dlp
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 MAX_LOCAL_AUDIO_BYTES = 80 * 1024 * 1024
 MAX_TTS_WAIT_SECONDS = 30
+YOUTUBE_TITLE_PENDING = "กำลังโหลดชื่อเพลง…"
 YOUTUBE_CHALLENGE_COOLDOWN_SECONDS = 10 * 60
 _youtube_challenge_lock = threading.Lock()
 _youtube_challenge_until = 0.0
@@ -42,6 +44,29 @@ def valid_query(query: str) -> bool:
     if parsed.scheme or parsed.netloc:
         return parsed.scheme == "https" and parsed.hostname in YOUTUBE_HOSTS
     return True  # Keyword searches always use YouTube
+
+
+def _is_single_youtube_video(query: str) -> bool:
+    """Avoid a redundant metadata request for direct single-video links.
+
+    Playlists still need yt-dlp expansion; keyword searches still need YouTube.
+    The playback worker resolves the title and audio stream in one operation.
+    """
+    parsed = urlparse(query)
+    if parsed.hostname not in YOUTUBE_HOSTS:
+        return False
+    parameters = parse_qs(parsed.query)
+    if "list" in parameters:
+        return False
+    if parsed.hostname == "youtu.be":
+        video_id = parsed.path.strip("/")
+    elif parsed.path == "/watch":
+        video_id = parameters.get("v", [""])[0]
+    elif parsed.path.startswith(("/shorts/", "/live/")):
+        video_id = parsed.path.split("/")[2]
+    else:
+        return False
+    return re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id) is not None
 
 
 def _youtube_auth_options() -> dict:
@@ -126,6 +151,8 @@ def discover_tracks(query: str) -> list[dict]:
         raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
     if youtube_challenge_cooldown_seconds():
         raise MusicSourceUnavailable(_youtube_verification_message())
+    if _is_single_youtube_video(query):
+        return [{"title": YOUTUBE_TITLE_PENDING, "url": query}]
     settings = {
         "quiet": True,
         "no_warnings": True,
@@ -164,7 +191,7 @@ def discover_tracks(query: str) -> list[dict]:
     return result
 
 
-def music_audio_source(url: str) -> discord.AudioSource:
+def music_audio_source(url: str, *, title_callback: Callable[[str], None] | None = None) -> discord.AudioSource:
     """Use a YouTube stream only. Never substitute a different recording."""
     if not valid_query(url) or urlparse(url).hostname not in YOUTUBE_HOSTS:
         raise ValueError("รองรับเฉพาะลิงก์ YouTube แบบ HTTPS ค่ะ")
@@ -173,7 +200,7 @@ def music_audio_source(url: str) -> discord.AudioSource:
     # yt-dlp must fetch the media bytes through the same egress as extraction.
     # FFmpeg's normal URL streaming would otherwise bypass the configured proxy.
     if _youtube_proxy_options():
-        return downloaded_youtube_source(url)
+        return downloaded_youtube_source(url, title_callback=title_callback)
     options = {
         "quiet": True, "no_warnings": True, "noplaylist": True,
         "socket_timeout": 10, "extractor_retries": 1,
@@ -188,6 +215,8 @@ def music_audio_source(url: str) -> discord.AudioSource:
             _record_youtube_challenge()
             raise MusicSourceUnavailable(_youtube_verification_message()) from error
         raise
+    if title_callback and info and isinstance(info.get("title"), str):
+        title_callback(info["title"])
     return _ffmpeg_stream(info)
 
 
@@ -211,7 +240,7 @@ class TemporaryAudioSource(discord.AudioSource):
             self.directory.cleanup()
 
 
-def downloaded_youtube_source(url: str) -> discord.AudioSource:
+def downloaded_youtube_source(url: str, *, title_callback: Callable[[str], None] | None = None) -> discord.AudioSource:
     """Let yt-dlp fetch YouTube bytes itself when a proxy is configured."""
     if urlparse(url).hostname not in YOUTUBE_HOSTS:
         raise MusicSourceUnavailable("รองรับเฉพาะลิงก์ YouTube ค่ะ")
@@ -236,6 +265,8 @@ def downloaded_youtube_source(url: str) -> discord.AudioSource:
         with yt_dlp.YoutubeDL(settings) as downloader:
             info = downloader.extract_info(url, download=True)
             filename = downloader.prepare_filename(info) if info else None
+        if title_callback and info and isinstance(info.get("title"), str):
+            title_callback(info["title"])
         path = Path(filename) if filename else None
         if not path or not path.is_file() or path.stat().st_size > MAX_LOCAL_AUDIO_BYTES:
             raise MusicSourceUnavailable("ไม่สามารถดาวน์โหลดเสียง YouTube ได้ค่ะ")
@@ -466,6 +497,8 @@ class GuildPlayer:
         self.repeat_mode = "off"
         self.current: Track | None = None
         self.playback_status = "idle"
+        self.last_music_search_ms: int | None = None
+        self.last_music_prepare_ms: int | None = None
         self.last_music_error: str | None = None
         self.last_tts_error: str | None = None
         self.last_tts_engine: str | None = None
@@ -520,7 +553,17 @@ class GuildPlayer:
             self.last_music_error = None
             generation = self._music_generation
             try:
-                source = await asyncio.to_thread(music_audio_source, track.url)
+                loading_started = time.monotonic()
+                if track.title == YOUTUBE_TITLE_PENDING:
+                    source = await asyncio.to_thread(
+                        music_audio_source, track.url,
+                        title_callback=lambda title: setattr(track, "title", title),
+                    )
+                else:
+                    source = await asyncio.to_thread(music_audio_source, track.url)
+                self.last_music_prepare_ms = round((time.monotonic() - loading_started) * 1000)
+                log.info("YouTube stream preparation guild=%s took %d ms", self.vc.guild.id,
+                         self.last_music_prepare_ms)
                 if generation != self._music_generation:
                     source.cleanup()
                     continue

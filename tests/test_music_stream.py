@@ -53,6 +53,25 @@ class MusicStreamTests(unittest.TestCase):
         self.assertEqual(youtube_dl.call_args.args[0]["default_search"], "ytsearch1")
 
     @patch("app.player.yt_dlp.YoutubeDL")
+    def test_direct_video_avoids_duplicate_youtube_extraction(self, youtube_dl):
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        tracks = discover_tracks(url)
+        self.assertEqual(tracks, [{"title": player_module.YOUTUBE_TITLE_PENDING, "url": url}])
+        self.assertEqual(discover_tracks("https://youtu.be/dQw4w9WgXcQ"), [
+            {"title": player_module.YOUTUBE_TITLE_PENDING, "url": "https://youtu.be/dQw4w9WgXcQ"},
+        ])
+        youtube_dl.assert_not_called()
+
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_playlist_link_keeps_youtube_expansion(self, youtube_dl):
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL-example"
+        youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {
+            "entries": [{"title": "Playlist item", "webpage_url": self.YOUTUBE_URL}],
+        }
+        self.assertEqual(discover_tracks(url), [{"title": "Playlist item", "url": self.YOUTUBE_URL}])
+        youtube_dl.assert_called_once()
+
+    @patch("app.player.yt_dlp.YoutubeDL")
     def test_no_fallback_when_youtube_returns_no_results(self, youtube_dl):
         youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {"entries": []}
         self.assertEqual(discover_tracks("obscure track"), [])
@@ -87,6 +106,16 @@ class MusicStreamTests(unittest.TestCase):
         self.assertNotIn("X-Unsafe", headers)
         self.assertNotIn("Injected", headers)
         self.assertEqual(ffmpeg.call_args.args, ("https://example.invalid/audio",))
+
+    @patch("app.player.discord.FFmpegPCMAudio")
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_playback_updates_title_for_fast_direct_video(self, youtube_dl, ffmpeg):
+        youtube_dl.return_value.__enter__.return_value.extract_info.return_value = {
+            "url": "https://example.invalid/audio", "title": "Resolved YouTube title",
+        }
+        names = []
+        self.assertIs(music_audio_source(self.YOUTUBE_URL, title_callback=names.append), ffmpeg.return_value)
+        self.assertEqual(names, ["Resolved YouTube title"])
 
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_blocked_youtube_uses_cooldown_without_other_sources(self, youtube_dl):

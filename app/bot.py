@@ -5,6 +5,7 @@ import importlib.metadata
 import logging
 import os
 import shutil
+import time
 from datetime import datetime, timezone
 
 import discord
@@ -33,9 +34,14 @@ class VoiceHubBot(commands.Bot):
         self._tts_warmup_task: asyncio.Task | None = None
 
     async def setup_hook(self):
-        # Warm the TTS service while Discord registers slash commands. The
-        # first chat never waits for this task or speaks the warm-up text.
+        # Prime Thai TTS *before* connecting to guild voice channels. Without
+        # a brief wait the first real chat races the warm-up network request.
+        # A slow/unreachable TTS service must not keep the bot offline.
         self._tts_warmup_task = asyncio.create_task(warmup_thai(), name="thai-tts-warmup")
+        try:
+            await asyncio.wait_for(asyncio.shield(self._tts_warmup_task), timeout=3)
+        except asyncio.TimeoutError:
+            log.warning("Thai voice warm-up continues in background after 3 seconds")
         await self.add_cog(VoiceCommands(self))
         await self.tree.sync()
 
@@ -204,7 +210,10 @@ class VoiceHubBot(commands.Bot):
             raise ValueError("พิมพ์ /join เพื่อให้ลิลินเข้าห้องเสียงก่อนค่ะ")
         if not valid_query(query):
             raise ValueError("กรุณาใส่ชื่อเพลงหรือลิงก์ YouTube แบบ HTTPS")
+        started = time.monotonic()
         tracks = await asyncio.to_thread(discover_tracks, query)
+        player.last_music_search_ms = round((time.monotonic() - started) * 1000)
+        log.info("YouTube discovery guild=%s took %d ms", guild_id, player.last_music_search_ms)
         if not tracks:
             raise ValueError("ลิลินหาเพลงนี้ไม่เจอค่ะ")
         items = [Track(track["title"], track["url"], requester) for track in tracks]
@@ -336,6 +345,7 @@ class VoiceCommands(commands.Cog):
             f"📦 เฟรมเสียงที่สร้าง: เพลง {player.mixer.music_frames_sent} / เสียงอ่านและทดสอบ {player.mixer.speech_frames_sent}",
             f"⚠️ ส่งเสียงผิดพลาด: {player.last_transport_error or 'ไม่มี'}",
             f"🎵 เพลง: {player.playback_status}",
+            f"⏱️ เพลง: ค้นหา {player.last_music_search_ms if player.last_music_search_ms is not None else '—'} / เตรียมสตรีม {player.last_music_prepare_ms if player.last_music_prepare_ms is not None else '—'} ms",
             f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
             f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",
         ]
