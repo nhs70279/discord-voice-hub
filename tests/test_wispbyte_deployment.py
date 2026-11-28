@@ -35,6 +35,34 @@ class WispbyteDeploymentTests(unittest.TestCase):
                 self.assertTrue((root / "runtime").is_dir())
                 self.assertEqual((root / "data").stat().st_mode & 0o777, 0o700)
 
+    def test_cookie_upload_becomes_owner_only_at_startup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            data = Path(folder) / "data"
+            data.mkdir()
+            cookie_file = data / "youtube-cookies.txt"
+            cookie_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+            cookie_file.chmod(0o644)
+            with patch.dict(os.environ, {"YOUTUBE_COOKIES_PATH": "data/youtube-cookies.txt"}), \
+                patch.object(start_wispbyte, "ROOT", Path(folder)), \
+                patch.object(start_wispbyte, "DATA", data):
+                start_wispbyte.configure_youtube_cookies()
+                self.assertEqual(cookie_file.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(os.environ["YOUTUBE_COOKIES_PATH"], str(cookie_file))
+
+    def test_cookie_upload_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            data = Path(folder) / "data"
+            data.mkdir()
+            external = Path(folder) / "external.txt"
+            external.write_text("not cookies", encoding="utf-8")
+            (data / "youtube-cookies.txt").symlink_to(external)
+            with patch.dict(os.environ, {"YOUTUBE_COOKIES_PATH": "data/youtube-cookies.txt"}), \
+                patch.object(start_wispbyte, "ROOT", Path(folder)), \
+                patch.object(start_wispbyte, "DATA", data):
+                start_wispbyte.configure_youtube_cookies()
+                self.assertNotIn("YOUTUBE_COOKIES_PATH", os.environ)
+                self.assertEqual(external.stat().st_mode & 0o777, 0o644)
+
     def test_launcher_and_dependency_manifest(self):
         manifest = (ROOT / "requirements.wispbyte.txt").read_text(encoding="utf-8")
         self.assertIn("-r requirements.txt", manifest)

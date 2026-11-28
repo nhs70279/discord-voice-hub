@@ -52,6 +52,37 @@ def configure_storage() -> None:
     os.environ["PATH"] = str(RUNTIME) + os.pathsep + os.environ.get("PATH", "")
 
 
+def configure_youtube_cookies() -> None:
+    """Secure an explicitly configured cookie upload without reading its contents.
+
+    Wispbyte's web uploader may create files readable by other users. Only
+    tighten permissions on our dedicated data file, never arbitrary paths.
+    """
+    configured = os.getenv("YOUTUBE_COOKIES_PATH", "").strip()
+    if not configured:
+        return
+    path = Path(configured)
+    if not path.is_absolute():
+        path = ROOT / path
+    if path != DATA / "youtube-cookies.txt":
+        return
+    if path.is_symlink():
+        log.warning("Refusing a symlink for the YouTube cookie file")
+        os.environ.pop("YOUTUBE_COOKIES_PATH", None)
+        return
+    if not path.is_file():
+        log.info("YouTube cookies configured; waiting for a private file upload")
+        return
+    try:
+        path.chmod(0o600)
+    except OSError:
+        log.warning("Could not secure permissions for the YouTube cookie file")
+        os.environ.pop("YOUTUBE_COOKIES_PATH", None)
+        return
+    os.environ["YOUTUBE_COOKIES_PATH"] = str(path)
+    log.info("YouTube cookie file is owner-only readable")
+
+
 def configure_ffmpeg() -> None:
     """Make pip's bundled FFmpeg discoverable as `ffmpeg` for discord.py."""
     if shutil.which("ffmpeg"):
@@ -228,6 +259,7 @@ def main() -> None:
 
     load_dotenv(dotenv_path=ROOT / ".env")
     configure_storage()
+    configure_youtube_cookies()
     configure_ffmpeg()
     configure_deno()
 
