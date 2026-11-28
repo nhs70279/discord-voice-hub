@@ -117,6 +117,33 @@ class MusicStreamTests(unittest.TestCase):
         self.assertIs(music_audio_source(self.YOUTUBE_URL, title_callback=names.append), ffmpeg.return_value)
         self.assertEqual(names, ["Resolved YouTube title"])
 
+    @patch("app.player.time.monotonic", side_effect=[10.0, 10.2, 10.6, 12.4, 12.5])
+    def test_youtube_stage_timing_keeps_only_safe_labels(self, _clock):
+        timing = player_module.YouTubeRequestTiming()
+        timing.debug("[youtube] SECRET_VIDEO_ID: Downloading webpage https://secret.invalid/?token=private")
+        timing.debug("[youtube] SECRET_VIDEO_ID: Downloading mweb player API JSON")
+        timing.debug("[youtube] SECRET_VIDEO_ID: Downloading web safari player API JSON")
+        result = timing.summary()
+        self.assertEqual(result, {"เริ่มต้น": 200, "webpage": 400, "mweb": 1800, "web_safari": 100})
+        self.assertNotIn("SECRET_VIDEO_ID", str(result))
+        self.assertNotIn("token", str(result))
+
+    @patch("app.player.discord.FFmpegPCMAudio")
+    @patch("app.player.yt_dlp.YoutubeDL")
+    def test_timing_callback_measures_existing_extraction_without_new_requests(self, youtube_dl, ffmpeg):
+        def extract(_url, download):
+            self.assertFalse(download)
+            logger = youtube_dl.call_args.args[0]["logger"]
+            logger.debug("[youtube] private-id: Downloading mweb player API JSON")
+            return {"url": "https://example.invalid/audio"}
+
+        youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = extract
+        recorded = []
+        self.assertIs(music_audio_source(self.YOUTUBE_URL, timing_callback=recorded.append), ffmpeg.return_value)
+        self.assertEqual(len(recorded), 1)
+        self.assertIn("mweb", recorded[0])
+        self.assertEqual(youtube_dl.call_count, 1)
+
     @patch("app.player.yt_dlp.YoutubeDL")
     def test_blocked_youtube_uses_cooldown_without_other_sources(self, youtube_dl):
         youtube_dl.return_value.__enter__.return_value.extract_info.side_effect = DownloadError(

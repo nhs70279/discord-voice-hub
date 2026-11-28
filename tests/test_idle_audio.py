@@ -265,7 +265,9 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(self.player.current)
             self.assertEqual(self.player.playback_status, "error")
             self.assertIn("สตรีมเสียง", self.player.last_music_error)
-            resolve.assert_called_once_with("https://www.youtube.com/watch?v=abc")
+            resolve.assert_called_once()
+            self.assertEqual(resolve.call_args.args, ("https://www.youtube.com/watch?v=abc",))
+            self.assertTrue(callable(resolve.call_args.kwargs["timing_callback"]))
             download.assert_not_called()
 
     async def test_fast_youtube_url_updates_title_after_stream_resolution(self):
@@ -275,8 +277,9 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
         )
         stream = FakeAudioSource([bytes([3]) * FRAME_BYTES])
 
-        def resolve(_url, *, title_callback):
+        def resolve(_url, *, title_callback, timing_callback):
             title_callback("Actual YouTube song")
+            timing_callback({"เริ่มต้น": 110, "mweb": 740})
             return stream
 
         with patch.object(self.module, "music_audio_source", side_effect=resolve):
@@ -287,6 +290,7 @@ class IdleVoiceTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.01)
         self.assertIs(self.player.mixer.music, stream)
         self.assertEqual(track.title, "Actual YouTube song")
+        self.assertEqual(self.player.last_music_stages, {"เริ่มต้น": 110, "mweb": 740})
 
 
 if __name__ == "__main__":

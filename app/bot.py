@@ -346,6 +346,10 @@ class VoiceCommands(commands.Cog):
             f"⚠️ ส่งเสียงผิดพลาด: {player.last_transport_error or 'ไม่มี'}",
             f"🎵 เพลง: {player.playback_status}",
             f"⏱️ เพลง: ค้นหา {player.last_music_search_ms if player.last_music_search_ms is not None else '—'} / เตรียมสตรีม {player.last_music_prepare_ms if player.last_music_prepare_ms is not None else '—'} ms",
+            "🔬 YouTube ช่วงเวลาประมาณ: " + (
+                " / ".join(f"{stage} {elapsed}" for stage, elapsed in player.last_music_stages.items()) + " ms"
+                if player.last_music_stages else "ยังไม่มีข้อมูล"
+            ),
             f"⚠️ เพลงผิดพลาด: {player.last_music_error or 'ไม่มี'}",
             f"⚠️ เสียงอ่านผิดพลาด: {player.last_tts_error or 'ไม่มี'}",
         ]

@@ -32,6 +32,56 @@ _youtube_challenge_lock = threading.Lock()
 _youtube_challenge_until = 0.0
 
 
+class YouTubeRequestTiming:
+    """Estimate time between yt-dlp's existing request milestones.
+
+    yt-dlp sends informational extraction messages to ``logger.debug`` even
+    with ``quiet=True``. Store only fixed stage names and elapsed durations;
+    never retain or log full messages, URLs, tokens, or cookie information.
+    These are stage intervals, not per-HTTP-request timings.
+    """
+
+    _CLIENTS = ("mweb", "tv", "web safari", "web music", "web")
+
+    def __init__(self):
+        self.started = time.monotonic()
+        self.events: list[tuple[str, float]] = []
+
+    def debug(self, message: str):
+        message = str(message).lower()
+        stage = None
+        if "downloading webpage" in message:
+            stage = "webpage"
+        elif "downloading m3u8 information" in message:
+            stage = "hls"
+        else:
+            for client in self._CLIENTS:
+                if f"downloading {client} player api json" in message:
+                    stage = client.replace(" ", "_")
+                    break
+                if f"downloading {client} client config" in message:
+                    stage = "config"
+                    break
+        if stage:
+            self.events.append((stage, time.monotonic()))
+
+    def warning(self, _message: str):
+        pass  # Never write raw yt-dlp messages that may contain private URLs.
+
+    def error(self, _message: str):
+        pass
+
+    def summary(self) -> dict[str, int]:
+        totals: dict[str, float] = {}
+        label = "เริ่มต้น"
+        previous = self.started
+        for stage, timestamp in self.events:
+            totals[label] = totals.get(label, 0.0) + max(0.0, timestamp - previous)
+            label, previous = stage, timestamp
+        totals[label] = totals.get(label, 0.0) + max(0.0, time.monotonic() - previous)
+        return {stage: round(seconds * 1000) for stage, seconds in totals.items()}
+
+
 class MusicSourceUnavailable(RuntimeError):
     """A playback failure that can be explained to Discord users in Thai."""
 
@@ -191,7 +241,8 @@ def discover_tracks(query: str) -> list[dict]:
     return result
 
 
-def music_audio_source(url: str, *, title_callback: Callable[[str], None] | None = None) -> discord.AudioSource:
+def music_audio_source(url: str, *, title_callback: Callable[[str], None] | None = None,
+                       timing_callback: Callable[[dict[str, int]], None] | None = None) -> discord.AudioSource:
     """Use a YouTube stream only. Never substitute a different recording."""
     if not valid_query(url) or urlparse(url).hostname not in YOUTUBE_HOSTS:
         raise ValueError("รองรับเฉพาะลิงก์ YouTube แบบ HTTPS ค่ะ")
@@ -200,10 +251,12 @@ def music_audio_source(url: str, *, title_callback: Callable[[str], None] | None
     # yt-dlp must fetch the media bytes through the same egress as extraction.
     # FFmpeg's normal URL streaming would otherwise bypass the configured proxy.
     if _youtube_proxy_options():
-        return downloaded_youtube_source(url, title_callback=title_callback)
+        return downloaded_youtube_source(url, title_callback=title_callback, timing_callback=timing_callback)
+    timing = YouTubeRequestTiming()
     options = {
         "quiet": True, "no_warnings": True, "noplaylist": True,
         "socket_timeout": 10, "extractor_retries": 1,
+        "logger": timing,
         **_youtube_playback_options(),
         **_youtube_auth_options(),
     }
@@ -215,6 +268,9 @@ def music_audio_source(url: str, *, title_callback: Callable[[str], None] | None
             _record_youtube_challenge()
             raise MusicSourceUnavailable(_youtube_verification_message()) from error
         raise
+    finally:
+        if timing_callback:
+            timing_callback(timing.summary())
     if title_callback and info and isinstance(info.get("title"), str):
         title_callback(info["title"])
     return _ffmpeg_stream(info)
@@ -240,7 +296,8 @@ class TemporaryAudioSource(discord.AudioSource):
             self.directory.cleanup()
 
 
-def downloaded_youtube_source(url: str, *, title_callback: Callable[[str], None] | None = None) -> discord.AudioSource:
+def downloaded_youtube_source(url: str, *, title_callback: Callable[[str], None] | None = None,
+                              timing_callback: Callable[[dict[str, int]], None] | None = None) -> discord.AudioSource:
     """Let yt-dlp fetch YouTube bytes itself when a proxy is configured."""
     if urlparse(url).hostname not in YOUTUBE_HOSTS:
         raise MusicSourceUnavailable("รองรับเฉพาะลิงก์ YouTube ค่ะ")
@@ -252,10 +309,12 @@ def downloaded_youtube_source(url: str, *, title_callback: Callable[[str], None]
             raise MusicSourceUnavailable("ไฟล์เสียง YouTube ใหญ่เกินขีดจำกัด 80 MiB ค่ะ")
 
     directory = tempfile.TemporaryDirectory(prefix="lilin-audio-")
+    timing = YouTubeRequestTiming()
     try:
         settings = {
             "quiet": True, "no_warnings": True, "noplaylist": True,
             "socket_timeout": 10, "extractor_retries": 1,
+            "logger": timing,
             "outtmpl": str(Path(directory.name) / "audio.%(ext)s"),
             "max_filesize": MAX_LOCAL_AUDIO_BYTES,
             "progress_hooks": [check_size],
@@ -280,6 +339,9 @@ def downloaded_youtube_source(url: str, *, title_callback: Callable[[str], None]
     except BaseException:
         directory.cleanup()
         raise
+    finally:
+        if timing_callback:
+            timing_callback(timing.summary())
 
 
 def _ffmpeg_stream(info: dict | None) -> discord.AudioSource:
@@ -499,6 +561,7 @@ class GuildPlayer:
         self.playback_status = "idle"
         self.last_music_search_ms: int | None = None
         self.last_music_prepare_ms: int | None = None
+        self.last_music_stages: dict[str, int] | None = None
         self.last_music_error: str | None = None
         self.last_tts_error: str | None = None
         self.last_tts_engine: str | None = None
@@ -551,19 +614,24 @@ class GuildPlayer:
             self.current = track
             self.playback_status = "loading"
             self.last_music_error = None
+            self.last_music_stages = None
             generation = self._music_generation
             try:
                 loading_started = time.monotonic()
+                options = {"timing_callback": lambda stages: setattr(self, "last_music_stages", stages)}
                 if track.title == YOUTUBE_TITLE_PENDING:
                     source = await asyncio.to_thread(
                         music_audio_source, track.url,
                         title_callback=lambda title: setattr(track, "title", title),
+                        **options,
                     )
                 else:
-                    source = await asyncio.to_thread(music_audio_source, track.url)
+                    source = await asyncio.to_thread(music_audio_source, track.url, **options)
                 self.last_music_prepare_ms = round((time.monotonic() - loading_started) * 1000)
                 log.info("YouTube stream preparation guild=%s took %d ms", self.vc.guild.id,
                          self.last_music_prepare_ms)
+                log.info("YouTube extraction stage intervals guild=%s stages=%s", self.vc.guild.id,
+                         self.last_music_stages)
                 if generation != self._music_generation:
                     source.cleanup()
                     continue
